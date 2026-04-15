@@ -1,0 +1,19 @@
+name: Networks
+author: Allync
+description: A Slimefun addon focused on logistics networks. Fork and Modified by Allync.
+main: io.github.sefiraat.networks.Networks
+website: https://github.com/Sefiraat/Networks
+version: ${project.version}
+api-version: 1.21
+folia-supported: true
+depend:
+  - Slimefun
+softdepend:
+  - InfinityExpansion
+  - Netheopoiesis
+  - SlimeHUD
+  - WildChests
+commands:
+  networks:
+    description: /networks
+    usage: /networks <sub>

@@ -1,0 +1,36 @@
+# Build output
+/target/
+/bin/
+/build/
+/out/
+/dependency-reduced-pom.xml
+
+# IDE files
+/.idea/
+/.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.factorypath
+/.settings/
+
+# Logs and crash dumps
+*.log
+logs/
+hs_err_pid*
+replay_pid*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# Local reference material
+/Networks-Exp-b3-reference/
