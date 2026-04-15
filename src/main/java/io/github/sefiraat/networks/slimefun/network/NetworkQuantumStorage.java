@@ -1,5 +1,6 @@
 package io.github.sefiraat.networks.slimefun.network;
 
+import io.github.sefiraat.networks.Networks;
 import io.github.sefiraat.networks.network.stackcaches.QuantumCache;
 import io.github.sefiraat.networks.utils.Keys;
 import io.github.sefiraat.networks.utils.StackUtils;
@@ -26,6 +27,8 @@ import me.mrCookieSlime.Slimefun.api.BlockStorage;
 import me.mrCookieSlime.Slimefun.api.inventory.BlockMenu;
 import me.mrCookieSlime.Slimefun.api.inventory.BlockMenuPreset;
 import me.mrCookieSlime.Slimefun.api.item_transport.ItemTransportFlow;
+import org.bukkit.configuration.InvalidConfigurationException;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Tag;
@@ -35,15 +38,11 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.util.io.BukkitObjectInputStream;
-import org.bukkit.util.io.BukkitObjectOutputStream;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.ParametersAreNonnullByDefault;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -426,44 +425,72 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         } catch (NumberFormatException ignored) {
         }
         final boolean voidExcess = voidString == null || Boolean.parseBoolean(voidString);
-        ItemStack itemStack = deserializeItemStack(storedItemString);
-        if (itemStack == null) {
-            itemStack = blockMenu.getItemInSlot(ITEM_SLOT);
-        }
+        final ItemStack itemStack = resolveStoredItem(blockMenu, storedItemString);
 
         QuantumCache cache = createCache(itemStack, blockMenu, amount, voidExcess);
 
         CACHES.put(location, cache);
-        if (cache.getItemStack() != null || amount <= 0) {
+        if (canPersistCache(cache)) {
             syncBlock(location, cache);
+        } else {
+            Networks.getInstance().getLogger().warning("Unable to rebuild quantum item at " + location + ", preserving stored amount until the item template can be recovered.");
         }
         return cache;
     }
 
-    private QuantumCache createCache(@Nullable ItemStack itemStack, @Nonnull BlockMenu menu, int amount, boolean voidExcess) {
-        if (itemStack == null || itemStack.getType() == Material.AIR || isDisplayItem(itemStack)) {
-            menu.addItem(ITEM_SLOT, NO_ITEM.item());
-            return new QuantumCache(null, 0, this.maxAmount, true);
-        } else {
-            final ItemStack clone = itemStack.clone();
-            final ItemMeta itemMeta = clone.getItemMeta();
-            final List<String> lore = itemMeta != null && itemMeta.hasLore() ? new ArrayList<>(itemMeta.getLore()) : null;
-            if (lore != null && hasQuantumDisplayLore(lore)) {
-                if (lore.get(lore.size() - 1).contains("Capacity:")) {
-                    lore.remove(lore.size() - 1);
-                }
-                lore.remove(lore.size() - 1);
-                lore.remove(lore.size() - 1);
-                if (!lore.isEmpty() && lore.get(lore.size() - 1).isBlank()) {
-                    lore.remove(lore.size() - 1);
-                }
-            }
-            if (itemMeta != null) {
-                itemMeta.setLore(lore == null || lore.isEmpty() ? null : lore);
-                clone.setItemMeta(itemMeta);
-            }
+    @Nullable
+    private ItemStack resolveStoredItem(@Nonnull BlockMenu blockMenu, @Nullable String storedItemString) {
+        ItemStack itemStack = normalizeStoredItem(deserializeItemStack(storedItemString));
 
-            final QuantumCache cache = new QuantumCache(clone, amount, this.maxAmount, voidExcess);
+        if (itemStack == null) {
+            itemStack = normalizeStoredItem(blockMenu.getItemInSlot(ITEM_SLOT));
+        }
+
+        if (itemStack == null) {
+            itemStack = normalizeStoredItem(blockMenu.getItemInSlot(OUTPUT_SLOT));
+        }
+
+        return itemStack;
+    }
+
+    @Nullable
+    private ItemStack normalizeStoredItem(@Nullable ItemStack itemStack) {
+        if (itemStack == null || itemStack.getType() == Material.AIR || isDisplayItem(itemStack)) {
+            return null;
+        }
+
+        final ItemStack clone = itemStack.clone();
+        final ItemMeta itemMeta = clone.getItemMeta();
+        final List<String> lore = itemMeta != null && itemMeta.hasLore() ? new ArrayList<>(itemMeta.getLore()) : null;
+
+        if (lore != null && hasQuantumDisplayLore(lore)) {
+            if (lore.get(lore.size() - 1).contains("Capacity:")) {
+                lore.remove(lore.size() - 1);
+            }
+            lore.remove(lore.size() - 1);
+            lore.remove(lore.size() - 1);
+            if (!lore.isEmpty() && lore.get(lore.size() - 1).isBlank()) {
+                lore.remove(lore.size() - 1);
+            }
+        }
+
+        if (itemMeta != null) {
+            itemMeta.setLore(lore == null || lore.isEmpty() ? null : lore);
+            clone.setItemMeta(itemMeta);
+        }
+
+        clone.setAmount(1);
+        return clone;
+    }
+
+    private QuantumCache createCache(@Nullable ItemStack itemStack, @Nonnull BlockMenu menu, int amount, boolean voidExcess) {
+        final ItemStack normalizedItem = normalizeStoredItem(itemStack);
+
+        if (normalizedItem == null) {
+            menu.replaceExistingItem(ITEM_SLOT, NO_ITEM.item());
+            return new QuantumCache(null, amount, this.maxAmount, voidExcess);
+        } else {
+            final QuantumCache cache = new QuantumCache(normalizedItem, amount, this.maxAmount, voidExcess);
 
             updateDisplayItem(menu, cache);
             return cache;
@@ -598,8 +625,9 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
             return fetched;
         } else {
             // Storage has everything we need
+            final ItemStack fetched = cache.withdrawItem(amount);
             syncBlock(blockMenu.getLocation(), cache);
-            return cache.withdrawItem(amount);
+            return fetched;
         }
     }
 
@@ -622,6 +650,11 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     }
 
     private static void syncBlock(@Nonnull Location location, @Nonnull QuantumCache cache) {
+        if (!canPersistCache(cache)) {
+            GridCacheManager.markAllCachesDirty();
+            return;
+        }
+
         BlockStorage.addBlockInfo(location, BS_AMOUNT, String.valueOf(cache.getAmount()));
         BlockStorage.addBlockInfo(location, BS_VOID, String.valueOf(cache.isVoidExcess()));
         BlockStorage.addBlockInfo(location, BS_ITEM, serializeItemStack(cache.getItemStack()));
@@ -640,21 +673,24 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         }
     }
 
+    private static boolean canPersistCache(@Nonnull QuantumCache cache) {
+        return cache.getItemStack() != null || cache.getAmount() <= 0;
+    }
+
     @Nullable
     private static String serializeItemStack(@Nullable ItemStack itemStack) {
         if (itemStack == null || itemStack.getType() == Material.AIR) {
             return null;
         }
 
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-             BukkitObjectOutputStream dataOutput = new BukkitObjectOutputStream(outputStream)
-        ) {
+        try {
             final ItemStack clone = itemStack.clone();
             clone.setAmount(1);
-            dataOutput.writeObject(clone);
-            dataOutput.flush();
-            return Base64.getEncoder().encodeToString(outputStream.toByteArray());
-        } catch (IOException ignored) {
+
+            final YamlConfiguration yaml = new YamlConfiguration();
+            yaml.set("item", clone);
+            return Base64.getEncoder().encodeToString(yaml.saveToString().getBytes(StandardCharsets.UTF_8));
+        } catch (IllegalArgumentException ignored) {
             return null;
         }
     }
@@ -665,14 +701,37 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
             return null;
         }
 
-        try (ByteArrayInputStream inputStream = new ByteArrayInputStream(Base64.getDecoder().decode(serialized));
-             BukkitObjectInputStream dataInput = new BukkitObjectInputStream(inputStream)
+        try {
+            final byte[] decoded = Base64.getDecoder().decode(serialized);
+            final YamlConfiguration yaml = new YamlConfiguration();
+            yaml.loadFromString(new String(decoded, StandardCharsets.UTF_8));
+
+            final ItemStack itemStack = yaml.getItemStack("item");
+            if (itemStack != null && itemStack.getType() != Material.AIR) {
+                itemStack.setAmount(1);
+                return itemStack;
+            }
+        } catch (IllegalArgumentException | InvalidConfigurationException ignored) {
+        }
+
+        return deserializeLegacyItemStack(serialized);
+    }
+
+    @Nullable
+    private static ItemStack deserializeLegacyItemStack(@Nullable String serialized) {
+        if (serialized == null || serialized.isBlank()) {
+            return null;
+        }
+
+        try (java.io.ByteArrayInputStream inputStream = new java.io.ByteArrayInputStream(Base64.getDecoder().decode(serialized));
+             org.bukkit.util.io.BukkitObjectInputStream dataInput = new org.bukkit.util.io.BukkitObjectInputStream(inputStream)
         ) {
             final Object object = dataInput.readObject();
             if (object instanceof ItemStack itemStack) {
+                itemStack.setAmount(1);
                 return itemStack;
             }
-        } catch (IOException | ClassNotFoundException | IllegalArgumentException ignored) {
+        } catch (java.io.IOException | ClassNotFoundException | IllegalArgumentException ignored) {
         }
 
         return null;
