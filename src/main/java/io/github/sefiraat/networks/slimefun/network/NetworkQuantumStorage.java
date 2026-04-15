@@ -29,6 +29,7 @@ import me.mrCookieSlime.Slimefun.api.inventory.BlockMenuPreset;
 import me.mrCookieSlime.Slimefun.api.item_transport.ItemTransportFlow;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Tag;
@@ -416,16 +417,13 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
 
     private QuantumCache addCache(@Nonnull BlockMenu blockMenu) {
         final Location location = blockMenu.getLocation();
+        final DisplayRecovery itemSlotRecovery = recoverDisplayState(blockMenu.getItemInSlot(ITEM_SLOT));
         final String amountString = BlockStorage.getLocationInfo(location, BS_AMOUNT);
         final String voidString = BlockStorage.getLocationInfo(location, BS_VOID);
         final String storedItemString = BlockStorage.getLocationInfo(location, BS_ITEM);
-        int amount = 0;
-        try {
-            amount = amountString == null ? 0 : Integer.parseInt(amountString);
-        } catch (NumberFormatException ignored) {
-        }
-        final boolean voidExcess = voidString == null || Boolean.parseBoolean(voidString);
-        final ItemStack itemStack = resolveStoredItem(blockMenu, storedItemString);
+        final int amount = parseStoredAmount(amountString, itemSlotRecovery.amount());
+        final boolean voidExcess = parseStoredVoid(voidString, itemSlotRecovery.voidExcess());
+        final ItemStack itemStack = resolveStoredItem(blockMenu, storedItemString, itemSlotRecovery);
 
         QuantumCache cache = createCache(itemStack, blockMenu, amount, voidExcess);
 
@@ -439,11 +437,11 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     }
 
     @Nullable
-    private ItemStack resolveStoredItem(@Nonnull BlockMenu blockMenu, @Nullable String storedItemString) {
+    private ItemStack resolveStoredItem(@Nonnull BlockMenu blockMenu, @Nullable String storedItemString, @Nonnull DisplayRecovery itemSlotRecovery) {
         ItemStack itemStack = normalizeStoredItem(deserializeItemStack(storedItemString));
 
         if (itemStack == null) {
-            itemStack = normalizeStoredItem(blockMenu.getItemInSlot(ITEM_SLOT));
+            itemStack = itemSlotRecovery.itemStack();
         }
 
         if (itemStack == null) {
@@ -451,6 +449,68 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         }
 
         return itemStack;
+    }
+
+    @Nonnull
+    private DisplayRecovery recoverDisplayState(@Nullable ItemStack itemStack) {
+        final ItemStack normalized = normalizeStoredItem(itemStack);
+        if (itemStack == null || itemStack.getType() == Material.AIR) {
+            return new DisplayRecovery(normalized, null, null);
+        }
+
+        final ItemMeta itemMeta = itemStack.getItemMeta();
+        final List<String> lore = itemMeta != null && itemMeta.hasLore() ? itemMeta.getLore() : null;
+        if (lore == null || lore.isEmpty() || !hasQuantumDisplayLore(lore)) {
+            return new DisplayRecovery(normalized, null, null);
+        }
+
+        Integer recoveredAmount = null;
+        Boolean recoveredVoid = null;
+
+        for (String line : lore) {
+            final String stripped = ChatColor.stripColor(line);
+            if (stripped == null) {
+                continue;
+            }
+
+            if (stripped.startsWith("Amount:")) {
+                try {
+                    recoveredAmount = Integer.parseInt(stripped.substring("Amount:".length()).trim());
+                } catch (NumberFormatException ignored) {
+                }
+            } else if (stripped.startsWith("Voiding:")) {
+                recoveredVoid = Boolean.parseBoolean(stripped.substring("Voiding:".length()).trim());
+            }
+        }
+
+        return new DisplayRecovery(normalized, recoveredAmount, recoveredVoid);
+    }
+
+    private int parseStoredAmount(@Nullable String amountString, @Nullable Integer recoveredAmount) {
+        if (amountString != null) {
+            try {
+                return Integer.parseInt(amountString);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+
+        if (recoveredAmount != null) {
+            return recoveredAmount;
+        }
+
+        return 0;
+    }
+
+    private boolean parseStoredVoid(@Nullable String voidString, @Nullable Boolean recoveredVoid) {
+        if (voidString != null) {
+            return Boolean.parseBoolean(voidString);
+        }
+
+        if (recoveredVoid != null) {
+            return recoveredVoid;
+        }
+
+        return true;
     }
 
     @Nullable
@@ -748,5 +808,8 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     @Override
     public boolean canStack(@Nonnull ItemMeta sfItemMeta, @Nonnull ItemMeta itemMeta) {
         return sfItemMeta.getPersistentDataContainer().equals(itemMeta.getPersistentDataContainer());
+    }
+
+    private record DisplayRecovery(@Nullable ItemStack itemStack, @Nullable Integer amount, @Nullable Boolean voidExcess) {
     }
 }
