@@ -18,6 +18,10 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.text.MessageFormat;
 import java.util.HashMap;
 import java.util.Map;
@@ -49,6 +53,7 @@ public class Networks extends JavaPlugin implements SlimefunAddon {
         getLogger().info("########################################");
 
         saveDefaultConfig();
+        sanitizeConfig();
         tryUpdate();
 
         this.supportedPluginManager = new SupportedPluginManager();
@@ -64,6 +69,24 @@ public class Networks extends JavaPlugin implements SlimefunAddon {
     @Override
     public void onDisable() {
         NetworkQuantumStorage.persistCaches();
+    }
+
+    private void sanitizeConfig() {
+        File configFile = new File(getDataFolder(), "config.yml");
+        if (!configFile.exists()) {
+            return;
+        }
+        try {
+            String content = new String(Files.readAllBytes(configFile.toPath()), StandardCharsets.UTF_8);
+            if (content.contains("\t")) {
+                String fixed = content.replace("\t", "  ");
+                Files.write(configFile.toPath(), fixed.getBytes(StandardCharsets.UTF_8));
+                reloadConfig();
+                getLogger().warning("config.yml contained tab characters — automatically converted to spaces.");
+            }
+        } catch (IOException e) {
+            getLogger().severe("Failed to sanitize config.yml: " + e.getMessage());
+        }
     }
 
     public void tryUpdate() {
