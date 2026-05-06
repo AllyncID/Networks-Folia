@@ -1,10 +1,12 @@
 package io.github.sefiraat.networks.slimefun.network;
 
 import io.github.sefiraat.networks.NetworkStorage;
+import io.github.sefiraat.networks.Networks;
 import io.github.sefiraat.networks.network.NetworkNode;
 import io.github.sefiraat.networks.network.NetworkRoot;
 import io.github.sefiraat.networks.network.NodeDefinition;
 import io.github.sefiraat.networks.network.NodeType;
+import io.github.sefiraat.networks.utils.FoliaSupport;
 import io.github.sefiraat.networks.utils.Theme;
 import io.github.thebusybiscuit.slimefun4.api.events.PlayerRightClickEvent;
 import io.github.thebusybiscuit.slimefun4.api.items.ItemGroup;
@@ -38,6 +40,8 @@ public class NetworkController extends NetworkObject {
     private static final String CRAYON = "crayon";
     private static final Map<Location, NetworkRoot> NETWORKS = new ConcurrentHashMap<>();
     private static final Set<Location> CRAYONS = ConcurrentHashMap.newKeySet();
+    private static final Set<Location> QUEUED_REBUILDS = ConcurrentHashMap.newKeySet();
+    private static final Map<Location, Integer> QUEUED_REBUILD_LIMITS = new ConcurrentHashMap<>();
     // Cooldown Map
     private static final Map<UUID, Long> PLACEMENT_COOLDOWN = new ConcurrentHashMap<>();
     private static final int COOLDOWN_SECONDS = 8;
@@ -67,7 +71,7 @@ public class NetworkController extends NetworkObject {
                             }
 
                             addToRegistry(block);
-                            rebuildNetwork(block.getLocation(), getConfiguredMaxNodes());
+                            scheduleRebuild(block.getLocation(), getConfiguredMaxNodes());
                         }
 
                         NetworkRoot root = NETWORKS.get(block.getLocation());
@@ -107,6 +111,9 @@ public class NetworkController extends NetworkObject {
 
             for (BlockFace checkFace : CHECK_FACES) {
                 Block checkBlock = target.getRelative(checkFace);
+                if (!FoliaSupport.isOwnedByCurrentRegion(checkBlock.getLocation())) {
+                    continue;
+                }
                 SlimefunItem slimefunItem = BlockStorage.check(checkBlock);
 
                 // For directly adjacent controllers
@@ -138,7 +145,16 @@ public class NetworkController extends NetworkObject {
 
     @Override
     protected void onBreak(@Nonnull BlockBreakEvent event) {
+        final Location location = event.getBlock().getLocation();
         super.onBreak(event);
+
+        QUEUED_REBUILD_LIMITS.remove(location);
+        QUEUED_REBUILDS.remove(location);
+        CRAYONS.remove(location);
+        firstTickMap.remove(location);
+        wipeNetwork(location);
+        NetworkStorage.removeNode(location);
+
         // Reset/Set cooldown saat block dihancurkan juga
         PLACEMENT_COOLDOWN.put(event.getPlayer().getUniqueId(), System.currentTimeMillis());
     }
@@ -164,6 +180,25 @@ public class NetworkController extends NetworkObject {
         return NETWORKS;
     }
 
+    public static void scheduleRebuild(@Nonnull Location location, int maxNodes) {
+        final Location rebuildLocation = location.clone();
+        QUEUED_REBUILD_LIMITS.merge(rebuildLocation, maxNodes, Math::max);
+
+        if (!QUEUED_REBUILDS.add(rebuildLocation)) {
+            return;
+        }
+
+        FoliaSupport.runGlobalLater(Networks.getInstance(), 1L, () -> {
+            final Integer queuedMaxNodes = QUEUED_REBUILD_LIMITS.remove(rebuildLocation);
+            QUEUED_REBUILDS.remove(rebuildLocation);
+            if (queuedMaxNodes == null) {
+                return;
+            }
+
+            FoliaSupport.executeRegion(Networks.getInstance(), rebuildLocation, () -> rebuildNetwork(rebuildLocation, queuedMaxNodes));
+        });
+    }
+
     public static Set<Location> getCrayons() {
         return CRAYONS;
     }
@@ -183,6 +218,12 @@ public class NetworkController extends NetworkObject {
     }
 
     public static synchronized void rebuildNetwork(@Nonnull Location location, int maxNodes) {
+        final SlimefunItem controllerItem = BlockStorage.check(location);
+        if (!(controllerItem instanceof NetworkController)) {
+            NETWORKS.remove(location);
+            return;
+        }
+
         final NetworkRoot existingRoot = NETWORKS.remove(location);
         if (existingRoot != null) {
             clearAssignedNodes(existingRoot);

@@ -47,6 +47,12 @@ public class NetworkConfigurator extends SlimefunItem {
                             && slimefunItem instanceof NetworkDirectional directional
                         ) {
                             final BlockMenu blockMenu = BlockStorage.getInventory(block);
+                            if (blockMenu == null) {
+                                player.sendMessage(Theme.ERROR + "This Networks block is not ready yet. Please try again in a moment.");
+                                e.cancel();
+                                return;
+                            }
+
                             if (player.isSneaking()) {
                                 setConfigurator(directional, e.getItem(), blockMenu, player);
                             } else {

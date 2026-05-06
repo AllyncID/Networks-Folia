@@ -22,19 +22,34 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 public class NetworkUtils {
 
-    public static void applyConfig(@Nonnull NetworkDirectional directional, @Nonnull BlockMenu blockMenu, @Nonnull Player player) {
+    public static void applyConfig(@Nonnull NetworkDirectional directional, @Nullable BlockMenu blockMenu, @Nonnull Player player) {
+        if (blockMenu == null) {
+            return;
+        }
+
         ItemStack itemStack = player.getInventory().getItemInOffHand();
 
-        if (SlimefunItem.getByItem(itemStack) instanceof NetworkConfigurator) {
+        if (itemStack != null && SlimefunItem.getByItem(itemStack) instanceof NetworkConfigurator) {
             applyConfig(directional, itemStack, blockMenu, player);
         }
     }
 
-    public static void applyConfig(@Nonnull NetworkDirectional directional, @Nonnull ItemStack itemStack, @Nonnull BlockMenu blockMenu, @Nonnull Player player) {
+    public static void applyConfig(@Nonnull NetworkDirectional directional, @Nonnull ItemStack itemStack, @Nullable BlockMenu blockMenu, @Nonnull Player player) {
+        if (blockMenu == null) {
+            player.sendMessage(Theme.ERROR + "This Networks block is not ready yet. Please try again in a moment.");
+            return;
+        }
+
         final ItemMeta itemMeta = itemStack.getItemMeta();
+        if (itemMeta == null) {
+            player.sendMessage(Theme.ERROR + "The held configurator has invalid metadata.");
+            return;
+        }
+
         final ItemStack[] templateStacks = DataTypeMethods.getCustom(itemMeta, Keys.ITEM, DataType.ITEM_STACK_ARRAY);
         final String string = DataTypeMethods.getCustom(itemMeta, Keys.FACE, DataType.STRING);
 
@@ -43,12 +58,21 @@ public class NetworkUtils {
             return;
         }
 
-        directional.setDirection(blockMenu, BlockFace.valueOf(string));
-        player.sendMessage(Theme.ERROR + "Direction: " + Theme.PASSIVE + "Successfully applied");
+        final BlockFace blockFace;
+        try {
+            blockFace = BlockFace.valueOf(string);
+        } catch (IllegalArgumentException ignored) {
+            player.sendMessage(Theme.ERROR + "Direction: " + Theme.PASSIVE + "Invalid stored direction");
+            return;
+        }
+
+        directional.setDirection(blockMenu, blockFace);
+        player.sendMessage(Theme.SUCCESS + "Direction: " + Theme.PASSIVE + "Successfully applied");
 
 
-        if (directional.getItemSlots().length > 0) {
-            for (int slot : directional.getItemSlots()) {
+        final int[] itemSlots = directional.getItemSlots();
+        if (itemSlots.length > 0) {
+            for (int slot : itemSlots) {
                 final ItemStack stackToDrop = blockMenu.getItemInSlot(slot);
                 if (stackToDrop != null && stackToDrop.getType() != Material.AIR) {
                     blockMenu.getLocation().getWorld().dropItem(blockMenu.getLocation(), stackToDrop.clone());
@@ -60,13 +84,17 @@ public class NetworkUtils {
         if (templateStacks != null) {
             int i = 0;
             for (ItemStack templateStack : templateStacks) {
+                if (i >= itemSlots.length) {
+                    break;
+                }
+
                 if (templateStack != null && templateStack.getType() != Material.AIR) {
                     boolean worked = false;
                     for (ItemStack stack : player.getInventory()) {
                         if (StackUtils.itemsMatch(stack, templateStack)) {
                             final ItemStack stackClone = StackUtils.getAsQuantity(stack, 1);
                             stack.setAmount(stack.getAmount() - 1);
-                            blockMenu.replaceExistingItem(directional.getItemSlots()[i], stackClone);
+                            blockMenu.replaceExistingItem(itemSlots[i], stackClone);
                             player.sendMessage(Theme.SUCCESS + "Item [" + i + "]: " + Theme.PASSIVE + "Item added into filter");
                             worked = true;
                             break;
@@ -83,6 +111,9 @@ public class NetworkUtils {
         } else {
             player.sendMessage(Theme.WARNING + "Items: " + Theme.PASSIVE + "No items in stored config");
         }
+
+        blockMenu.markDirty();
+        directional.persistBlockMetadata(blockMenu.getLocation());
     }
 
     public static void clearNetwork(Location location) {
