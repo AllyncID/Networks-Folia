@@ -5,6 +5,7 @@ import io.github.sefiraat.networks.network.NodeDefinition;
 import io.github.sefiraat.networks.network.NodeType;
 import io.github.sefiraat.networks.network.stackcaches.ItemRequest;
 import io.github.sefiraat.networks.slimefun.NetworkSlimefunItems;
+import io.github.sefiraat.networks.utils.PersistentNetworkMetadata;
 import io.github.sefiraat.networks.utils.Theme;
 import io.github.thebusybiscuit.slimefun4.api.items.ItemGroup;
 import io.github.thebusybiscuit.slimefun4.api.items.SlimefunItem;
@@ -83,18 +84,25 @@ public class NetworkWirelessTransmitter extends NetworkObject {
 
                         boolean isFirstTick = firstTick.getOrDefault(block.getLocation(), true);
                         if (isFirstTick) {
-                            final String xString = BlockStorage.getLocationInfo(
+                            String xString = PersistentNetworkMetadata.getString(
                                 block.getLocation(),
                                 LINKED_LOCATION_KEY_X
                             );
-                            final String yString = BlockStorage.getLocationInfo(
+                            String yString = PersistentNetworkMetadata.getString(
                                 block.getLocation(),
                                 LINKED_LOCATION_KEY_Y
                             );
-                            final String zString = BlockStorage.getLocationInfo(
+                            String zString = PersistentNetworkMetadata.getString(
                                 block.getLocation(),
                                 LINKED_LOCATION_KEY_Z
                             );
+
+                            if (xString == null || yString == null || zString == null) {
+                                xString = BlockStorage.getLocationInfo(block.getLocation(), LINKED_LOCATION_KEY_X);
+                                yString = BlockStorage.getLocationInfo(block.getLocation(), LINKED_LOCATION_KEY_Y);
+                                zString = BlockStorage.getLocationInfo(block.getLocation(), LINKED_LOCATION_KEY_Z);
+                            }
+
                             if (xString != null && yString != null && zString != null) {
                                 try {
                                     final Location linkedLocation = new Location(
@@ -168,6 +176,7 @@ public class NetworkWirelessTransmitter extends NetworkObject {
             if (stackToPush != null) {
                 definition.getNode().getRoot().removeRootPower(REQUIRED_POWER);
                 linkedBlockMenu.pushItem(stackToPush, NetworkWirelessReceiver.RECEIVED_SLOT);
+                linkedBlockMenu.markDirty();
                 if (definition.getNode().getRoot().isDisplayParticles()) {
                     final Location particleLocation = blockMenu.getLocation().clone().add(0.5, 1.1, 0.5);
                     final Location particleLocation2 = linkedBlockMenu.getLocation().clone().add(0.5, 2.1, 0.5);
@@ -220,6 +229,7 @@ public class NetworkWirelessTransmitter extends NetworkObject {
     @Override
     protected void onBreak(@Nonnull BlockBreakEvent event) {
         super.onBreak(event);
+        PersistentNetworkMetadata.clearLocation(event.getBlock().getLocation());
         linkedLocations.remove(event.getBlock().getLocation());
     }
 
@@ -228,6 +238,10 @@ public class NetworkWirelessTransmitter extends NetworkObject {
         BlockStorage.addBlockInfo(block, LINKED_LOCATION_KEY_X, String.valueOf(linkedLocation.getBlockX()));
         BlockStorage.addBlockInfo(block, LINKED_LOCATION_KEY_Y, String.valueOf(linkedLocation.getBlockY()));
         BlockStorage.addBlockInfo(block, LINKED_LOCATION_KEY_Z, String.valueOf(linkedLocation.getBlockZ()));
+        PersistentNetworkMetadata.setString(block.getLocation(), LINKED_LOCATION_KEY_X, String.valueOf(linkedLocation.getBlockX()));
+        PersistentNetworkMetadata.setString(block.getLocation(), LINKED_LOCATION_KEY_Y, String.valueOf(linkedLocation.getBlockY()));
+        PersistentNetworkMetadata.setString(block.getLocation(), LINKED_LOCATION_KEY_Z, String.valueOf(linkedLocation.getBlockZ()));
+        persistBlockMetadata(block.getLocation());
     }
 
 }

@@ -8,6 +8,8 @@ import io.github.sefiraat.networks.integrations.NetheoPlants;
 import io.github.sefiraat.networks.slimefun.NetworkSlimefunItems;
 import io.github.sefiraat.networks.slimefun.network.NetworkController;
 import io.github.sefiraat.networks.slimefun.network.NetworkQuantumStorage;
+import io.github.sefiraat.networks.utils.DeferredBlockStorageSave;
+import io.github.sefiraat.networks.utils.PersistentNetworkMetadata;
 import io.github.thebusybiscuit.slimefun4.api.SlimefunAddon;
 import io.github.thebusybiscuit.slimefun4.libraries.dough.updater.BlobBuildUpdater;
 
@@ -54,6 +56,7 @@ public class Networks extends JavaPlugin implements SlimefunAddon {
 
         saveDefaultConfig();
         sanitizeConfig();
+        PersistentNetworkMetadata.initialize();
         tryUpdate();
 
         this.supportedPluginManager = new SupportedPluginManager();
@@ -69,6 +72,8 @@ public class Networks extends JavaPlugin implements SlimefunAddon {
     @Override
     public void onDisable() {
         NetworkQuantumStorage.persistCaches();
+        PersistentNetworkMetadata.flushNow();
+        DeferredBlockStorageSave.flushNow();
     }
 
     private void sanitizeConfig() {

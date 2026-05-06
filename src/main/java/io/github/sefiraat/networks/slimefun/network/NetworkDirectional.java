@@ -3,6 +3,8 @@ package io.github.sefiraat.networks.slimefun.network;
 import io.github.sefiraat.networks.NetworkStorage;
 import io.github.sefiraat.networks.network.NodeType;
 import io.github.sefiraat.networks.utils.NetworkUtils;
+import io.github.sefiraat.networks.utils.FoliaSupport;
+import io.github.sefiraat.networks.utils.PersistentNetworkMetadata;
 import io.github.sefiraat.networks.utils.Theme;
 import io.github.thebusybiscuit.slimefun4.api.items.ItemGroup;
 import io.github.thebusybiscuit.slimefun4.api.items.ItemSetting;
@@ -25,6 +27,7 @@ import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.enchantments.Enchantment;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.entity.Player;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.inventory.ItemFlag;
@@ -78,10 +81,16 @@ public abstract class NetworkDirectional extends NetworkObject {
                 new BlockPlaceHandler(false) {
                     @Override
                     public void onPlayerPlace(@Nonnull BlockPlaceEvent event) {
-                        NetworkStorage.removeNode(event.getBlock().getLocation());
-                        BlockStorage.addBlockInfo(event.getBlock(), OWNER_KEY, event.getPlayer().getUniqueId().toString());
-                        BlockStorage.addBlockInfo(event.getBlock(), DIRECTION, BlockFace.SELF.name());
+                        final Location location = event.getBlock().getLocation();
+                        NetworkStorage.removeNode(location);
+                        SELECTED_DIRECTION_MAP.remove(location);
+                        BlockStorage.addBlockInfo(location, OWNER_KEY, event.getPlayer().getUniqueId().toString());
+                        BlockStorage.addBlockInfo(location, DIRECTION, BlockFace.SELF.name());
+                        PersistentNetworkMetadata.setString(location, OWNER_KEY, event.getPlayer().getUniqueId().toString());
+                        PersistentNetworkMetadata.setString(location, DIRECTION, BlockFace.SELF.name());
+                        SELECTED_DIRECTION_MAP.put(location.clone(), BlockFace.SELF);
                         NetworkUtils.applyConfig(NetworkDirectional.this, BlockStorage.getInventory(event.getBlock()), event.getPlayer());
+                        persistBlockMetadata(location);
                     }
                 },
                 new BlockTicker() {
@@ -120,7 +129,10 @@ public abstract class NetworkDirectional extends NetworkObject {
         BlockFace direction = getCurrentDirection(blockMenu);
 
         for (BlockFace blockFace : VALID_FACES) {
-            final Block block = blockMenu.getBlock().getRelative(blockFace);
+            final Block block = getAdjacentOwnedBlock(blockMenu.getBlock(), blockFace);
+            if (block == null) {
+                continue;
+            }
             final SlimefunItem slimefunItem = BlockStorage.check(block);
             if (slimefunItem != null) {
                 switch (blockFace) {
@@ -161,24 +173,27 @@ public abstract class NetworkDirectional extends NetworkObject {
 
     @Nonnull
     private BlockFace readStoredDirection(@Nonnull Location location) {
-        final String storedDirection = BlockStorage.getLocationInfo(location, DIRECTION);
+        final String storedDirection = getStoredDirectionString(location);
 
         if (storedDirection == null || storedDirection.isBlank()) {
-            BlockStorage.addBlockInfo(location, DIRECTION, BlockFace.SELF.name());
             return BlockFace.SELF;
         }
 
         try {
-            return BlockFace.valueOf(storedDirection);
+            final BlockFace blockFace = BlockFace.valueOf(storedDirection);
+            return isValidStoredDirection(blockFace) ? blockFace : BlockFace.SELF;
         } catch (IllegalArgumentException ignored) {
-            BlockStorage.addBlockInfo(location, DIRECTION, BlockFace.SELF.name());
             return BlockFace.SELF;
         }
     }
 
+    private static boolean isValidStoredDirection(@Nonnull BlockFace blockFace) {
+        return blockFace == BlockFace.SELF || VALID_FACES.contains(blockFace);
+    }
+
     @Nullable
     protected UUID getOwnerUuid(@Nonnull Location location) {
-        final String storedOwner = BlockStorage.getLocationInfo(location, OWNER_KEY);
+        final String storedOwner = getStoredOwnerString(location);
 
         if (storedOwner == null || storedOwner.isBlank()) {
             return null;
@@ -209,6 +224,10 @@ public abstract class NetworkDirectional extends NetworkObject {
         return slots == null ? NO_SLOTS : slots;
     }
 
+    protected static boolean hasStoredSlimefunData(@Nonnull Block block) {
+        return BlockStorage.checkID(block) != null || BlockStorage.hasBlockInfo(block);
+    }
+
     @OverridingMethodsMustInvokeSuper
     protected void onTick(@Nullable BlockMenu blockMenu, @Nonnull Block block) {
         addToRegistry(block);
@@ -216,6 +235,13 @@ public abstract class NetworkDirectional extends NetworkObject {
     }
 
     protected void onUniqueTick() {}
+
+    @Override
+    protected void onBreak(@Nonnull BlockBreakEvent event) {
+        PersistentNetworkMetadata.clearLocation(event.getBlock().getLocation());
+        SELECTED_DIRECTION_MAP.remove(event.getBlock().getLocation());
+        super.onBreak(event);
+    }
 
     @Override
     public void postRegister() {
@@ -273,6 +299,18 @@ public abstract class NetworkDirectional extends NetworkObject {
         };
     }
 
+    @Nullable
+    protected Block getAdjacentOwnedBlock(@Nonnull Block sourceBlock, @Nonnull BlockFace blockFace) {
+        final Block targetBlock = sourceBlock.getRelative(blockFace);
+        return FoliaSupport.isOwnedByCurrentRegion(targetBlock.getLocation()) ? targetBlock : null;
+    }
+
+    @Nullable
+    protected BlockMenu getAdjacentOwnedMenu(@Nonnull BlockMenu blockMenu, @Nonnull BlockFace blockFace) {
+        final Block targetBlock = getAdjacentOwnedBlock(blockMenu.getBlock(), blockFace);
+        return targetBlock == null ? null : BlockStorage.getInventory(targetBlock);
+    }
+
     @ParametersAreNonnullByDefault
     public boolean directionClick(Player player, ClickAction action, BlockMenu blockMenu, BlockFace blockFace) {
         if (action.isShiftClicked()) {
@@ -285,7 +323,7 @@ public abstract class NetworkDirectional extends NetworkObject {
 
     @ParametersAreNonnullByDefault
     public void openDirection(Player player, BlockMenu blockMenu, BlockFace blockFace) {
-        final BlockMenu targetMenu = BlockStorage.getInventory(blockMenu.getBlock().getRelative(blockFace));
+        final BlockMenu targetMenu = getAdjacentOwnedMenu(blockMenu, blockFace);
         if (targetMenu != null) {
             final Location location = targetMenu.getLocation();
             final SlimefunItem item = BlockStorage.check(location);
@@ -300,8 +338,24 @@ public abstract class NetworkDirectional extends NetworkObject {
 
     @ParametersAreNonnullByDefault
     public void setDirection(BlockMenu blockMenu, BlockFace blockFace) {
-        SELECTED_DIRECTION_MAP.put(blockMenu.getLocation().clone(), blockFace);
-        BlockStorage.addBlockInfo(blockMenu.getBlock(), DIRECTION, blockFace.name());
+        final BlockFace storedFace = isValidStoredDirection(blockFace) ? blockFace : BlockFace.SELF;
+        final Location location = blockMenu.getLocation();
+        SELECTED_DIRECTION_MAP.put(location.clone(), storedFace);
+        BlockStorage.addBlockInfo(location, DIRECTION, storedFace.name());
+        PersistentNetworkMetadata.setString(location, DIRECTION, storedFace.name());
+        persistBlockMetadata(location);
+    }
+
+    @Nullable
+    private static String getStoredDirectionString(@Nonnull Location location) {
+        final String persistedDirection = PersistentNetworkMetadata.getString(location, DIRECTION);
+        return persistedDirection != null ? persistedDirection : BlockStorage.getLocationInfo(location, DIRECTION);
+    }
+
+    @Nullable
+    private static String getStoredOwnerString(@Nonnull Location location) {
+        final String persistedOwner = PersistentNetworkMetadata.getString(location, OWNER_KEY);
+        return persistedOwner != null ? persistedOwner : BlockStorage.getLocationInfo(location, OWNER_KEY);
     }
 
     @Nonnull
@@ -360,8 +414,7 @@ public abstract class NetworkDirectional extends NetworkObject {
 
     @Nonnull
     public static ItemStack getDirectionalSlotPane(@Nonnull BlockFace blockFace, @Nonnull SlimefunItem slimefunItem, boolean active) {
-        final SlimefunItemStack displayStack = new SlimefunItemStack(
-                "NTW_DIRECTIONAL_SLOT_PANE_SLIMEFUN",
+        final ItemStack displayStack = createDisplayStack(
                 slimefunItem.getItem(),
                 Theme.PASSIVE + "Direction " + blockFace.name() + " (" + ChatColor.stripColor(slimefunItem.getItemName()) + ")"
         );
@@ -375,14 +428,13 @@ public abstract class NetworkDirectional extends NetworkObject {
                 Theme.CLICK_INFO + "Shift Left Click: " + Theme.PASSIVE + "Open Target Block"
         ));
         displayStack.setItemMeta(itemMeta);
-        return displayStack.item();
+        return displayStack;
     }
 
     @Nonnull
     public static ItemStack getDirectionalSlotPane(@Nonnull BlockFace blockFace, @Nonnull Material blockMaterial, boolean active) {
         if (blockMaterial.isItem() && !blockMaterial.isAir()) {
-            final SlimefunItemStack displayStack = new SlimefunItemStack(
-                    "NTW_DIRECTIONAL_SLOT_PANE_MATERIAL",
+            final ItemStack displayStack = createDisplayStack(
                     blockMaterial,
                     Theme.PASSIVE + "Direction " + blockFace.name() + " (" + blockMaterial.name() + ")"
             );
@@ -396,33 +448,47 @@ public abstract class NetworkDirectional extends NetworkObject {
                     Theme.CLICK_INFO + "Shift Left Click: " + Theme.PASSIVE + "Open Target Block"
             ));
             displayStack.setItemMeta(itemMeta);
-            return displayStack.item();
+            return displayStack;
         } else {
             Material material = active ? Material.GREEN_STAINED_GLASS_PANE : Material.RED_STAINED_GLASS_PANE;
-            return new SlimefunItemStack(
-                    "NTW_DIRECTIONAL_SLOT_PANE_INACTIVE",
+            return createDisplayStack(
                     material,
                     ChatColor.GRAY + "Set direction: " + blockFace.name()
-            ).item();
+            );
         }
+    }
+
+    @Nonnull
+    private static ItemStack createDisplayStack(@Nonnull ItemStack itemStack, @Nonnull String name) {
+        final ItemStack displayStack = itemStack.clone();
+        final ItemMeta itemMeta = displayStack.getItemMeta();
+        itemMeta.setDisplayName(name);
+        displayStack.setItemMeta(itemMeta);
+        return displayStack;
+    }
+
+    @Nonnull
+    private static ItemStack createDisplayStack(@Nonnull Material material, @Nonnull String name) {
+        return createDisplayStack(new ItemStack(material), name);
     }
 
     @Nullable
     public static BlockFace getSelectedFace(@Nonnull Location location) {
         final BlockFace cached = SELECTED_DIRECTION_MAP.get(location);
         if (cached != null) {
-            return cached;
+            return isValidStoredDirection(cached) ? cached : BlockFace.SELF;
         }
 
-        final String storedDirection = BlockStorage.getLocationInfo(location, DIRECTION);
+        final String storedDirection = getStoredDirectionString(location);
         if (storedDirection == null || storedDirection.isBlank()) {
             return BlockFace.SELF;
         }
 
         try {
             final BlockFace direction = BlockFace.valueOf(storedDirection);
-            SELECTED_DIRECTION_MAP.put(location.clone(), direction);
-            return direction;
+            final BlockFace storedFace = isValidStoredDirection(direction) ? direction : BlockFace.SELF;
+            SELECTED_DIRECTION_MAP.put(location.clone(), storedFace);
+            return storedFace;
         } catch (IllegalArgumentException ignored) {
             return BlockFace.SELF;
         }

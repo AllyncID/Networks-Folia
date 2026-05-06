@@ -13,7 +13,6 @@ import io.github.thebusybiscuit.slimefun4.api.recipes.RecipeType;
 import io.github.thebusybiscuit.slimefun4.core.handlers.BlockBreakHandler;
 import io.github.thebusybiscuit.slimefun4.core.handlers.BlockPlaceHandler;
 import io.github.thebusybiscuit.slimefun4.core.handlers.ItemUseHandler;
-import io.github.thebusybiscuit.slimefun4.implementation.items.blocks.UnplaceableBlock;
 
 import lombok.Getter;
 import me.mrCookieSlime.CSCoreLibPlugin.Configuration.Config;
@@ -21,8 +20,9 @@ import me.mrCookieSlime.Slimefun.Objects.handlers.BlockTicker;
 import me.mrCookieSlime.Slimefun.api.BlockStorage;
 import me.mrCookieSlime.Slimefun.api.inventory.BlockMenu;
 import org.bukkit.Location;
-import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
+import io.github.sefiraat.networks.utils.DeferredBlockStorageSave;
+import org.bukkit.block.Block;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.inventory.ItemStack;
@@ -38,7 +38,6 @@ public abstract class NetworkObject extends SlimefunItem implements AdminDebugga
 
     @Getter
     private final NodeType nodeType;
-    @Getter
     private final List<Integer> slotsToDrop = new ArrayList<>();
 
     public List<Integer> getSlotsToDrop() {
@@ -112,7 +111,7 @@ public abstract class NetworkObject extends SlimefunItem implements AdminDebugga
             final SlimefunItem slimefunItem = BlockStorage.check(testLocation);
 
             if (slimefunItem instanceof NetworkController controller) {
-                NetworkController.rebuildNetwork(testLocation, controller.getConfiguredMaxNodes());
+                NetworkController.scheduleRebuild(testLocation, controller.getConfiguredMaxNodes());
                 return;
             }
 
@@ -125,7 +124,7 @@ public abstract class NetworkObject extends SlimefunItem implements AdminDebugga
             if (controllerLocation != null) {
                 final SlimefunItem controllerItem = BlockStorage.check(controllerLocation);
                 if (controllerItem instanceof NetworkController controller) {
-                    NetworkController.rebuildNetwork(controllerLocation, controller.getConfiguredMaxNodes());
+                    NetworkController.scheduleRebuild(controllerLocation, controller.getConfiguredMaxNodes());
                     return;
                 }
             }
@@ -194,6 +193,15 @@ public abstract class NetworkObject extends SlimefunItem implements AdminDebugga
 
     protected void onPlace(@Nonnull BlockPlaceEvent event) {
 
+    }
+
+    public void persistBlockMetadata(@Nonnull Location location) {
+        final String storedId = BlockStorage.getLocationInfo(location, "id");
+        if (storedId == null || storedId.isBlank()) {
+            BlockStorage.addBlockInfo(location, "id", getId(), true);
+        }
+
+        DeferredBlockStorageSave.markDirty(location);
     }
 
     public boolean runSync() {
