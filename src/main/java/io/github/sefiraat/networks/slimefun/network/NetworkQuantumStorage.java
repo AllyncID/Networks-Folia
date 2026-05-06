@@ -429,6 +429,7 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         final ItemStack itemStack = resolveStoredItem(blockMenu, storedItemString, itemSlotRecovery);
 
         QuantumCache cache = createCache(itemStack, blockMenu, amount, voidExcess);
+        reconcileStoredSlots(blockMenu, cache);
 
         CACHES.put(location, cache);
         if (canPersistCache(cache)) {
@@ -449,6 +450,15 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
 
         if (itemStack == null) {
             itemStack = itemSlotRecovery.itemStack();
+        }
+
+        final ItemStack inputSlotItem = normalizeStoredItem(blockMenu.getItemInSlot(INPUT_SLOT));
+        if (shouldPreferRecoveredItem(itemStack, inputSlotItem)) {
+            itemStack = inputSlotItem;
+        }
+
+        if (itemStack == null) {
+            itemStack = inputSlotItem;
         }
 
         final ItemStack outputSlotItem = normalizeStoredItem(blockMenu.getItemInSlot(OUTPUT_SLOT));
@@ -584,6 +594,42 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
             updateDisplayItem(menu, cache);
             return cache;
         }
+    }
+
+    private void reconcileStoredSlots(@Nonnull BlockMenu blockMenu, @Nonnull QuantumCache cache) {
+        if (cache.getItemStack() == null) {
+            return;
+        }
+
+        boolean changed = false;
+        changed |= absorbStoredSlot(blockMenu, cache, INPUT_SLOT);
+        changed |= absorbStoredSlot(blockMenu, cache, OUTPUT_SLOT);
+
+        if (changed) {
+            updateDisplayItem(blockMenu, cache);
+            blockMenu.markDirty();
+        }
+    }
+
+    private boolean absorbStoredSlot(@Nonnull BlockMenu blockMenu, @Nonnull QuantumCache cache, int slot) {
+        final ItemStack slotItem = blockMenu.getItemInSlot(slot);
+
+        if (slotItem == null || slotItem.getType() == Material.AIR || !StackUtils.itemsMatch(cache, slotItem, true)) {
+            return false;
+        }
+
+        final int leftover = cache.increaseAmount(slotItem.getAmount());
+        if (leftover == slotItem.getAmount()) {
+            return false;
+        }
+
+        if (leftover <= 0) {
+            blockMenu.replaceExistingItem(slot, null);
+        } else {
+            slotItem.setAmount(leftover);
+        }
+
+        return true;
     }
 
     private boolean isDisplayItem(@Nonnull ItemStack itemStack) {
@@ -757,6 +803,11 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
             return;
         }
 
+        stageCache(location, cache, true);
+    }
+
+    private static void stageCache(@Nonnull Location location, @Nonnull QuantumCache cache, boolean markMenuDirty) {
+
         if (!canPersistCache(cache)) {
             GridCacheManager.markAllCachesDirty();
             return;
@@ -767,9 +818,11 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         BlockStorage.addBlockInfo(location, BS_ITEM, serializeItemStack(cache.getItemStack()));
         DeferredBlockStorageSave.markDirty(location);
 
-        final BlockMenu blockMenu = BlockStorage.getInventory(location);
-        if (blockMenu != null) {
-            blockMenu.markDirty();
+        if (markMenuDirty) {
+            final BlockMenu blockMenu = BlockStorage.getInventory(location);
+            if (blockMenu != null) {
+                blockMenu.markDirty();
+            }
         }
 
         GridCacheManager.markAllCachesDirty();
@@ -777,7 +830,7 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
 
     public static void persistCaches() {
         for (Map.Entry<Location, QuantumCache> entry : CACHES.entrySet()) {
-            syncBlock(entry.getKey(), entry.getValue());
+            stageCache(entry.getKey(), entry.getValue(), false);
         }
     }
 
