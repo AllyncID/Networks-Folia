@@ -39,7 +39,18 @@ public class NetworkNode {
     public NetworkNode(Location location, NodeType type) {
         this.nodePosition = location;
         this.nodeType = type;
-        this.power = retrieveBlockCharge();
+        this.power = retrieveInitialPower(location, type);
+    }
+
+    private long retrieveInitialPower(@Nonnull Location location, @Nonnull NodeType type) {
+        if (type == NodeType.POWER_NODE && FoliaSupport.isOwnedByCurrentRegion(location)) {
+            final SlimefunItem item = BlockStorage.check(location);
+            if (item instanceof NetworkPowerNode powerNode) {
+                return powerNode.getCharge(location);
+            }
+        }
+
+        return 0;
     }
 
     public void addChild(@Nonnull NetworkNode child) {
