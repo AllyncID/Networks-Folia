@@ -132,7 +132,7 @@ public class NetworkAutoCrafter extends NetworkObject {
 
         final long networkCharge = root.getRootPower();
 
-        if (networkCharge > this.chargePerCraft) {
+        if (networkCharge >= this.chargePerCraft) {
             final SlimefunItem item = SlimefunItem.getByItem(blueprint);
 
             if (!(item instanceof CraftingBlueprint)) {

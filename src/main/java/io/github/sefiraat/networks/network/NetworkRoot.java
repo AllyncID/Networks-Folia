@@ -881,12 +881,12 @@ public class NetworkRoot extends NetworkNode {
         long totalCharge = 0;
 
         for (Location node : powerNodes) {
-            final SlimefunItem item = getOwnedSlimefunItem(node);
-            if (!(item instanceof NetworkPowerNode powerNode)) {
+            final NodeDefinition definition = io.github.sefiraat.networks.NetworkStorage.getAllNetworkObjects().get(node);
+            if (definition == null || definition.getType() != NodeType.POWER_NODE) {
                 continue;
             }
 
-            final int charge = powerNode.getCharge(node);
+            final int charge = definition.getCharge();
             if (charge > 0) {
                 totalCharge += charge;
             }
@@ -912,21 +912,47 @@ public class NetworkRoot extends NetworkNode {
     public void removeRootPower(long power) {
         long removed = 0;
         for (Location node : powerNodes) {
-            final SlimefunItem item = getOwnedSlimefunItem(node);
-            if (item instanceof NetworkPowerNode powerNode) {
-                final int charge = powerNode.getCharge(node);
-                if (charge <= 0) {
-                    continue;
-                }
-                final int toRemove = (int) Math.min(power - removed, charge);
-                powerNode.removeCharge(node, toRemove);
-                this.rootPower.addAndGet(-toRemove);
-                removed = removed + toRemove;
+            final NodeDefinition definition = io.github.sefiraat.networks.NetworkStorage.getAllNetworkObjects().get(node);
+            if (definition == null || definition.getType() != NodeType.POWER_NODE) {
+                continue;
             }
+
+            final int charge = definition.getCharge();
+            if (charge <= 0) {
+                continue;
+            }
+
+            final int toRemove = (int) Math.min(power - removed, charge);
+            definition.setCharge(charge - toRemove);
+            removeChargeFromNode(node, toRemove);
+            this.rootPower.addAndGet(-toRemove);
+            removed = removed + toRemove;
+
             if (removed >= power) {
                 return;
             }
         }
+    }
+
+    private void removeChargeFromNode(@Nonnull Location node, int chargeToRemove) {
+        if (chargeToRemove <= 0) {
+            return;
+        }
+
+        if (FoliaSupport.isOwnedByCurrentRegion(node)) {
+            final SlimefunItem item = BlockStorage.check(node);
+            if (item instanceof NetworkPowerNode powerNode) {
+                powerNode.removeCharge(node, chargeToRemove);
+            }
+            return;
+        }
+
+        FoliaSupport.executeRegion(Networks.getInstance(), node, () -> {
+            final SlimefunItem item = BlockStorage.check(node);
+            if (item instanceof NetworkPowerNode powerNode) {
+                powerNode.removeCharge(node, chargeToRemove);
+            }
+        });
     }
 
     public boolean isDisplayParticles() {

@@ -98,11 +98,28 @@ public abstract class NetworkObject extends SlimefunItem implements AdminDebugga
     }
 
     protected void addToRegistry(@Nonnull Block block) {
-        if (!NetworkStorage.getAllNetworkObjects().containsKey(block.getLocation())) {
-            final NodeDefinition nodeDefinition = new NodeDefinition(nodeType);
-            NetworkStorage.getAllNetworkObjects().put(block.getLocation(), nodeDefinition);
-            rebuildAdjacentNetwork(block.getLocation());
+        final Location location = block.getLocation();
+        final NodeDefinition existingDefinition = NetworkStorage.getAllNetworkObjects().get(location);
+        final int currentCharge = getCurrentCharge(location);
+
+        if (existingDefinition == null) {
+            final NodeDefinition nodeDefinition = new NodeDefinition(nodeType, currentCharge);
+            NetworkStorage.getAllNetworkObjects().put(location, nodeDefinition);
+            rebuildAdjacentNetwork(location);
+            return;
         }
+
+        if (nodeType == NodeType.POWER_NODE) {
+            existingDefinition.setCharge(currentCharge);
+        }
+    }
+
+    private int getCurrentCharge(@Nonnull Location location) {
+        if (this instanceof NetworkPowerNode powerNode) {
+            return powerNode.getCharge(location);
+        }
+
+        return 0;
     }
 
     protected void rebuildAdjacentNetwork(@Nonnull Location location) {

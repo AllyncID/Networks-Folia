@@ -5,7 +5,7 @@ public class NodeDefinition {
     private final NodeType type;
     private final long timeRegistered;
     private NetworkNode node;
-    private final int charge;
+    private volatile int charge;
 
     public NodeDefinition(NodeType type) {
         this(type, 0);
@@ -27,6 +27,10 @@ public class NodeDefinition {
 
     public int getCharge() {
         return charge;
+    }
+
+    public void setCharge(int charge) {
+        this.charge = Math.max(0, charge);
     }
 
     public void setNode(NetworkNode node) {
