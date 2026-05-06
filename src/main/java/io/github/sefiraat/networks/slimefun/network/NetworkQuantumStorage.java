@@ -2,6 +2,8 @@ package io.github.sefiraat.networks.slimefun.network;
 
 import io.github.sefiraat.networks.Networks;
 import io.github.sefiraat.networks.network.stackcaches.QuantumCache;
+import io.github.sefiraat.networks.utils.DeferredBlockStorageSave;
+import io.github.sefiraat.networks.utils.FoliaSupport;
 import io.github.sefiraat.networks.utils.Keys;
 import io.github.sefiraat.networks.utils.StackUtils;
 import io.github.sefiraat.networks.utils.StringUtils;
@@ -216,6 +218,7 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
 
         if (fetched != null && fetched.getType() != Material.AIR) {
             blockMenu.pushItem(fetched, OUTPUT_SLOT);
+            blockMenu.markDirty();
             syncBlock(blockMenu.getLocation(), cache);
         }
 
@@ -440,15 +443,41 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     private ItemStack resolveStoredItem(@Nonnull BlockMenu blockMenu, @Nullable String storedItemString, @Nonnull DisplayRecovery itemSlotRecovery) {
         ItemStack itemStack = normalizeStoredItem(deserializeItemStack(storedItemString));
 
-        if (itemStack == null) {
+        if (shouldPreferRecoveredItem(itemStack, itemSlotRecovery.itemStack())) {
             itemStack = itemSlotRecovery.itemStack();
         }
 
         if (itemStack == null) {
-            itemStack = normalizeStoredItem(blockMenu.getItemInSlot(OUTPUT_SLOT));
+            itemStack = itemSlotRecovery.itemStack();
+        }
+
+        final ItemStack outputSlotItem = normalizeStoredItem(blockMenu.getItemInSlot(OUTPUT_SLOT));
+        if (shouldPreferRecoveredItem(itemStack, outputSlotItem)) {
+            itemStack = outputSlotItem;
+        }
+
+        if (itemStack == null) {
+            itemStack = outputSlotItem;
         }
 
         return itemStack;
+    }
+
+    private boolean shouldPreferRecoveredItem(@Nullable ItemStack currentItem, @Nullable ItemStack recoveredItem) {
+        if (recoveredItem == null) {
+            return false;
+        }
+
+        if (currentItem == null) {
+            return true;
+        }
+
+        final SlimefunItem currentSlimefunItem = SlimefunItem.getByItem(currentItem);
+        final SlimefunItem recoveredSlimefunItem = SlimefunItem.getByItem(recoveredItem);
+
+        return currentSlimefunItem == null
+            && recoveredSlimefunItem != null
+            && currentItem.getType() == recoveredItem.getType();
     }
 
     @Nonnull
@@ -626,13 +655,15 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         if (cache.getItemStack() == null) {
             return;
         }
-        for (ItemStack itemStack : input) {
-            if (isBlacklisted(itemStack)) {
-                continue;
-            }
-            if (StackUtils.itemsMatch(cache, itemStack, true)) {
-                int leftover = cache.increaseAmount(itemStack.getAmount());
-                itemStack.setAmount(leftover);
+        synchronized (cache) {
+            for (ItemStack itemStack : input) {
+                if (isBlacklisted(itemStack)) {
+                    continue;
+                }
+                if (StackUtils.itemsMatch(cache, itemStack, true)) {
+                    int leftover = cache.increaseAmount(itemStack.getAmount());
+                    itemStack.setAmount(leftover);
+                }
             }
         }
         syncBlock(location, cache);
@@ -657,36 +688,47 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     @ParametersAreNonnullByDefault
     @Nullable
     public static ItemStack getItemStack(@Nonnull QuantumCache cache, @Nonnull BlockMenu blockMenu, int amount) {
-        if (cache.getAmount() < amount) {
-            // Storage has no content or not enough, mix and match!
-            ItemStack output = blockMenu.getItemInSlot(OUTPUT_SLOT);
-            ItemStack fetched = cache.withdrawItem(amount);
+        synchronized (cache) {
+            if (cache.getAmount() < amount) {
+                // Storage has no content or not enough, mix and match!
+                ItemStack output = blockMenu.getItemInSlot(OUTPUT_SLOT);
+                ItemStack fetched = cache.withdrawItem(amount);
 
-            if (output != null
-                && output.getType() != Material.AIR
-                && StackUtils.itemsMatch(cache, output, true)
-            ) {
-                // We have an output item we can use also
-                if (fetched == null || fetched.getType() == Material.AIR) {
-                    // Storage is totally empty - just use output slot
-                    fetched = output.clone();
-                    if (fetched.getAmount() > amount) {
-                        fetched.setAmount(amount);
+                if (output != null
+                    && output.getType() != Material.AIR
+                    && StackUtils.itemsMatch(cache, output, true)
+                ) {
+                    // We have an output item we can use also
+                    if (fetched == null || fetched.getType() == Material.AIR) {
+                        // Storage is totally empty - just use output slot
+                        fetched = output.clone();
+                        if (fetched.getAmount() > amount) {
+                            fetched.setAmount(amount);
+                        }
+                        output.setAmount(output.getAmount() - fetched.getAmount());
+                    } else {
+                        // Storage has content, lets add on top of it
+                        int additional = Math.min(amount - fetched.getAmount(), output.getAmount());
+                        output.setAmount(output.getAmount() - additional);
+                        fetched.setAmount(fetched.getAmount() + additional);
                     }
-                    output.setAmount(output.getAmount() - fetched.getAmount());
-                } else {
-                    // Storage has content, lets add on top of it
-                    int additional = Math.min(amount - fetched.getAmount(), output.getAmount());
-                    output.setAmount(output.getAmount() - additional);
-                    fetched.setAmount(fetched.getAmount() + additional);
                 }
+
+                syncBlock(blockMenu.getLocation(), cache);
+                return fetched;
             }
-            syncBlock(blockMenu.getLocation(), cache);
-            return fetched;
-        } else {
-            // Storage has everything we need
+
             final ItemStack fetched = cache.withdrawItem(amount);
             syncBlock(blockMenu.getLocation(), cache);
+            return fetched;
+        }
+    }
+
+    @Nullable
+    public static ItemStack getItemStack(@Nonnull Location location, @Nonnull QuantumCache cache, int amount) {
+        synchronized (cache) {
+            final ItemStack fetched = cache.withdrawItem(amount);
+            syncBlock(location, cache);
             return fetched;
         }
     }
@@ -710,6 +752,11 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     }
 
     private static void syncBlock(@Nonnull Location location, @Nonnull QuantumCache cache) {
+        if (!FoliaSupport.isOwnedByCurrentRegion(location)) {
+            FoliaSupport.executeRegion(Networks.getInstance(), location, () -> syncBlock(location, cache));
+            return;
+        }
+
         if (!canPersistCache(cache)) {
             GridCacheManager.markAllCachesDirty();
             return;
@@ -718,6 +765,7 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         BlockStorage.addBlockInfo(location, BS_AMOUNT, String.valueOf(cache.getAmount()));
         BlockStorage.addBlockInfo(location, BS_VOID, String.valueOf(cache.isVoidExcess()));
         BlockStorage.addBlockInfo(location, BS_ITEM, serializeItemStack(cache.getItemStack()));
+        DeferredBlockStorageSave.markDirty(location);
 
         final BlockMenu blockMenu = BlockStorage.getInventory(location);
         if (blockMenu != null) {
@@ -747,6 +795,36 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
             final ItemStack clone = itemStack.clone();
             clone.setAmount(1);
 
+            return Base64.getEncoder().encodeToString(clone.serializeAsBytes());
+        } catch (IllegalArgumentException ignored) {
+            return serializeYamlItemStack(itemStack);
+        }
+    }
+
+    @Nullable
+    private static ItemStack deserializeItemStack(@Nullable String serialized) {
+        if (serialized == null || serialized.isBlank()) {
+            return null;
+        }
+
+        final ItemStack binaryItemStack = deserializeBinaryItemStack(serialized);
+        if (binaryItemStack != null) {
+            return binaryItemStack;
+        }
+
+        return deserializeYamlItemStack(serialized);
+    }
+
+    @Nullable
+    private static String serializeYamlItemStack(@Nullable ItemStack itemStack) {
+        if (itemStack == null || itemStack.getType() == Material.AIR) {
+            return null;
+        }
+
+        try {
+            final ItemStack clone = itemStack.clone();
+            clone.setAmount(1);
+
             final YamlConfiguration yaml = new YamlConfiguration();
             yaml.set("item", clone);
             return Base64.getEncoder().encodeToString(yaml.saveToString().getBytes(StandardCharsets.UTF_8));
@@ -756,7 +834,25 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     }
 
     @Nullable
-    private static ItemStack deserializeItemStack(@Nullable String serialized) {
+    private static ItemStack deserializeBinaryItemStack(@Nullable String serialized) {
+        if (serialized == null || serialized.isBlank()) {
+            return null;
+        }
+
+        try {
+            final ItemStack itemStack = ItemStack.deserializeBytes(Base64.getDecoder().decode(serialized));
+            if (itemStack != null && itemStack.getType() != Material.AIR) {
+                itemStack.setAmount(1);
+                return itemStack;
+            }
+        } catch (RuntimeException ignored) {
+        }
+
+        return null;
+    }
+
+    @Nullable
+    private static ItemStack deserializeYamlItemStack(@Nullable String serialized) {
         if (serialized == null || serialized.isBlank()) {
             return null;
         }

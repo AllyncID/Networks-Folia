@@ -234,6 +234,7 @@ public class NetworksSlimefunItemStacks {
             "",
             "Currently Supports:",
             "Infinity Barrels",
+            "Network Quantum Storages",
             "Network Shells"
         );
 

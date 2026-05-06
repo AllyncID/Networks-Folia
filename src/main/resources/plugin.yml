@@ -12,6 +12,7 @@ softdepend:
   - InfinityExpansion
   - Netheopoiesis
   - SlimeHUD
+  - OrionOptimize
   - WildChests
 commands:
   networks:

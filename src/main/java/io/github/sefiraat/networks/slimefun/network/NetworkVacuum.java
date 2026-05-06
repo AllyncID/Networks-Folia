@@ -3,6 +3,7 @@ package io.github.sefiraat.networks.slimefun.network;
 import dev.sefiraat.sefilib.misc.ParticleUtils;
 import io.github.sefiraat.networks.NetworkStorage;
 import io.github.sefiraat.networks.Networks;
+import io.github.sefiraat.networks.integrations.OrionStackerSupport;
 import io.github.sefiraat.networks.network.NodeDefinition;
 import io.github.sefiraat.networks.network.NodeType;
 import io.github.sefiraat.networks.slimefun.NetworkSlimefunItems;
@@ -109,15 +110,14 @@ public class NetworkVacuum extends NetworkObject {
 
                 Item item = targetItem.get();
 
-                // MODIFICATION: Mark the item for no-pickup *immediately* to prevent other vacuums from grabbing it
-                SlimefunUtils.markAsNoPickup(item, "Networks"); // Corrected method
-
-                // MODIFICATION: Clone the item stack to prevent issues with the item entity being removed
-                final ItemStack itemStack = item.getItemStack().clone();
+                final ItemStack itemStack = OrionStackerSupport.takeVacuumStack(item);
+                if (itemStack == null || itemStack.getType().isAir()) {
+                    return;
+                }
 
                 blockMenu.replaceExistingItem(inputSlot, itemStack);
+                blockMenu.markDirty();
                 ParticleUtils.displayParticleRandomly(item, 1, 5, new Particle.DustOptions(Color.BLUE, 1));
-                item.remove();
 
                 return; // Only pick up one item stack per tick to allow tryAddItem to process it
             }

@@ -74,7 +74,7 @@ public class NetworkImport extends NetworkObject {
     private void tryAddItem(@Nonnull BlockMenu blockMenu) {
         final NodeDefinition definition = NetworkStorage.getAllNetworkObjects().get(blockMenu.getLocation());
 
-        if (definition.getNode() == null) {
+        if (definition == null || definition.getNode() == null) {
             return;
         }
 
@@ -84,7 +84,18 @@ public class NetworkImport extends NetworkObject {
             if (itemStack == null || itemStack.getType() == Material.AIR) {
                 continue;
             }
+
+            final int originalAmount = itemStack.getAmount();
             definition.getNode().getRoot().addItemStack(itemStack);
+
+            if (itemStack.getType() == Material.AIR || itemStack.getAmount() <= 0) {
+                blockMenu.replaceExistingItem(inputSlot, null);
+                continue;
+            }
+
+            if (itemStack.getAmount() != originalAmount) {
+                blockMenu.markDirty();
+            }
         }
     }
 

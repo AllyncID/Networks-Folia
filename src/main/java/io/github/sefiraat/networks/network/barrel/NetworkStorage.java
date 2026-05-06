@@ -4,6 +4,7 @@ import io.github.sefiraat.networks.network.stackcaches.BarrelIdentity;
 import io.github.sefiraat.networks.network.stackcaches.ItemRequest;
 import io.github.sefiraat.networks.network.stackcaches.QuantumCache;
 import io.github.sefiraat.networks.slimefun.network.NetworkQuantumStorage;
+import io.github.sefiraat.networks.utils.FoliaSupport;
 import me.mrCookieSlime.Slimefun.api.BlockStorage;
 import me.mrCookieSlime.Slimefun.api.inventory.BlockMenu;
 import org.bukkit.Location;
@@ -21,29 +22,28 @@ public class NetworkStorage extends BarrelIdentity {
     @Override
     @Nullable
     public ItemStack requestItem(@Nonnull ItemRequest itemRequest) {
-        final BlockMenu blockMenu = BlockStorage.getInventory(this.getLocation());
-
-        if (blockMenu == null) {
-            return null;
-        }
-
-        final QuantumCache cache = NetworkQuantumStorage.getCaches().get(blockMenu.getLocation());
+        final Location location = this.getLocation();
+        final QuantumCache cache = NetworkQuantumStorage.getCaches().get(location);
 
         if (cache == null) {
             return null;
         }
 
-        return NetworkQuantumStorage.getItemStack(cache, blockMenu, itemRequest.getAmount());
+        if (FoliaSupport.isOwnedByCurrentRegion(location)) {
+            final BlockMenu blockMenu = BlockStorage.getInventory(location);
+            if (blockMenu != null) {
+                return NetworkQuantumStorage.getItemStack(cache, blockMenu, itemRequest.getAmount());
+            }
+        }
+
+        return NetworkQuantumStorage.getItemStack(location, cache, itemRequest.getAmount());
     }
 
     @Override
     public void depositItemStack(ItemStack[] itemsToDeposit) {
-        if (BlockStorage.check(this.getLocation()) instanceof NetworkQuantumStorage) {
-            final BlockMenu blockMenu = BlockStorage.getInventory(this.getLocation());
-            final QuantumCache cache = NetworkQuantumStorage.getCaches().get(this.getLocation());
-            if (cache != null) {
-                NetworkQuantumStorage.tryInputItem(blockMenu.getLocation(), itemsToDeposit, cache);
-            }
+        final QuantumCache cache = NetworkQuantumStorage.getCaches().get(this.getLocation());
+        if (cache != null) {
+            NetworkQuantumStorage.tryInputItem(this.getLocation(), itemsToDeposit, cache);
         }
     }
 

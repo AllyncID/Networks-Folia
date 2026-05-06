@@ -11,6 +11,7 @@ import io.github.sefiraat.networks.slimefun.network.NetworkDirectional;
 import io.github.sefiraat.networks.slimefun.network.NetworkGreedyBlock;
 import io.github.sefiraat.networks.slimefun.network.NetworkPowerNode;
 import io.github.sefiraat.networks.slimefun.network.NetworkQuantumStorage;
+import io.github.sefiraat.networks.utils.FoliaSupport;
 import io.github.sefiraat.networks.utils.StackUtils;
 import io.github.sefiraat.networks.slimefun.network.grid.GridCacheManager;
 import io.github.thebusybiscuit.slimefun4.api.items.SlimefunItem;
@@ -32,14 +33,15 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class NetworkRoot extends NetworkNode {
 
-    private final Set<Location> nodeLocations = new HashSet<>();
+    private final Set<Location> nodeLocations = ConcurrentHashMap.newKeySet();
     private final int maxNodes;
-    private boolean isOverburdened = false;
+    private volatile boolean isOverburdened = false;
 
-    private Location controller = null;
+    private volatile Location controller = null;
     private final Set<Location> bridges = ConcurrentHashMap.newKeySet();
     private final Set<Location> monitors = ConcurrentHashMap.newKeySet();
     private final Set<Location> importers = ConcurrentHashMap.newKeySet();
@@ -62,15 +64,29 @@ public class NetworkRoot extends NetworkNode {
     private final Set<Location> wirelessTransmitters = ConcurrentHashMap.newKeySet();
     private final Set<Location> wirelessReceivers = ConcurrentHashMap.newKeySet();
 
-    private long rootPower = 0;
+    private final AtomicLong rootPower = new AtomicLong();
 
-    private boolean displayParticles = false;
+    private volatile boolean displayParticles = false;
 
     public NetworkRoot(@Nonnull Location location, @Nonnull NodeType type, int maxNodes) {
         super(location, type);
         this.maxNodes = maxNodes;
         this.root = this;
         registerNode(location, type);
+    }
+
+    private boolean isOwnedByCurrentRegion(@Nonnull Location location) {
+        return FoliaSupport.isOwnedByCurrentRegion(location);
+    }
+
+    @Nullable
+    private SlimefunItem getOwnedSlimefunItem(@Nonnull Location location) {
+        return isOwnedByCurrentRegion(location) ? BlockStorage.check(location) : null;
+    }
+
+    @Nullable
+    private BlockMenu getOwnedInventory(@Nonnull Location location) {
+        return isOwnedByCurrentRegion(location) ? BlockStorage.getInventory(location) : null;
     }
 
     public void registerNode(@Nonnull Location location, @Nonnull NodeType type) {
@@ -324,8 +340,6 @@ public class NetworkRoot extends NetworkNode {
         final Set<Location> addedLocations = ConcurrentHashMap.newKeySet();
         final Set<BarrelIdentity> barrelSet = ConcurrentHashMap.newKeySet();
 
-        addDirectQuantumStorages(addedLocations, barrelSet);
-
         for (Location cellLocation : this.monitors) {
             final BlockFace face = NetworkDirectional.getSelectedFace(cellLocation);
 
@@ -335,17 +349,31 @@ public class NetworkRoot extends NetworkNode {
 
             final Location testLocation = cellLocation.clone().add(face.getDirection());
 
-            if (addedLocations.contains(testLocation)) {
+            if (!addedLocations.add(testLocation)) {
                 continue;
-            } else {
-                addedLocations.add(testLocation);
             }
 
-            final SlimefunItem slimefunItem = BlockStorage.check(testLocation);
+            final QuantumCache quantumCache = NetworkQuantumStorage.getCaches().get(testLocation);
+            if (quantumCache != null) {
+                final NetworkStorage storage = getNetworkStorage(testLocation, null, quantumCache);
+                if (storage != null) {
+                    barrelSet.add(storage);
+                }
+                continue;
+            }
+
+            if (!isOwnedByCurrentRegion(testLocation)) {
+                continue;
+            }
+
+            final SlimefunItem slimefunItem = getOwnedSlimefunItem(testLocation);
 
             if (Networks.getSupportedPluginManager()
                 .isInfinityExpansion() && slimefunItem instanceof StorageUnit unit) {
-                final BlockMenu menu = BlockStorage.getInventory(testLocation);
+                final BlockMenu menu = getOwnedInventory(testLocation);
+                if (menu == null) {
+                    continue;
+                }
                 final InfinityBarrel infinityBarrel = getInfinityBarrel(menu, unit);
                 if (infinityBarrel != null) {
                     barrelSet.add(infinityBarrel);
@@ -354,8 +382,11 @@ public class NetworkRoot extends NetworkNode {
             }
 
             if (slimefunItem instanceof NetworkQuantumStorage) {
-                final BlockMenu menu = BlockStorage.getInventory(testLocation);
-                final NetworkStorage storage = getNetworkStorage(menu);
+                final BlockMenu menu = getOwnedInventory(testLocation);
+                if (menu == null) {
+                    continue;
+                }
+                final NetworkStorage storage = getNetworkStorage(testLocation, menu, quantumCache);
                 if (storage != null) {
                     barrelSet.add(storage);
                 }
@@ -364,28 +395,6 @@ public class NetworkRoot extends NetworkNode {
         }
 
         return barrelSet;
-    }
-
-    private void addDirectQuantumStorages(@Nonnull Set<Location> addedLocations, @Nonnull Set<BarrelIdentity> barrelSet) {
-        for (Location nodeLocation : this.nodeLocations) {
-            for (BlockFace face : VALID_FACES) {
-                final Location testLocation = nodeLocation.clone().add(face.getDirection());
-
-                if (!addedLocations.add(testLocation)) {
-                    continue;
-                }
-
-                if (!(BlockStorage.check(testLocation) instanceof NetworkQuantumStorage)) {
-                    continue;
-                }
-
-                final BlockMenu menu = BlockStorage.getInventory(testLocation);
-                final NetworkStorage storage = getNetworkStorage(menu);
-                if (storage != null) {
-                    barrelSet.add(storage);
-                }
-            }
-        }
     }
 
     @Nullable
@@ -427,15 +436,13 @@ public class NetworkRoot extends NetworkNode {
     }
 
     @Nullable
-    private NetworkStorage getNetworkStorage(@Nonnull BlockMenu blockMenu) {
-
-        final QuantumCache cache = NetworkQuantumStorage.getCaches().get(blockMenu.getLocation());
+    private NetworkStorage getNetworkStorage(@Nonnull Location location, @Nullable BlockMenu blockMenu, @Nullable QuantumCache cache) {
 
         if (cache == null || cache.getItemStack() == null) {
             return null;
         }
 
-        final ItemStack output = blockMenu.getItemInSlot(NetworkQuantumStorage.OUTPUT_SLOT);
+        final ItemStack output = blockMenu == null ? null : blockMenu.getItemInSlot(NetworkQuantumStorage.OUTPUT_SLOT);
         final ItemStack itemStack = cache.getItemStack();
         int storedInt = cache.getAmount();
 
@@ -451,7 +458,7 @@ public class NetworkRoot extends NetworkNode {
         clone.setAmount(1);
 
         return new NetworkStorage(
-            blockMenu.getLocation(),
+            location,
             clone,
             storedInt
         );
@@ -461,7 +468,7 @@ public class NetworkRoot extends NetworkNode {
     public Set<BlockMenu> getCellMenus() {
         final Set<BlockMenu> menus = new HashSet<>();
         for (Location cellLocation : this.cells) {
-            BlockMenu menu = BlockStorage.getInventory(cellLocation);
+            BlockMenu menu = getOwnedInventory(cellLocation);
             if (menu != null) {
                 menus.add(menu);
             }
@@ -473,7 +480,7 @@ public class NetworkRoot extends NetworkNode {
     public Set<BlockMenu> getCrafterOutputs() {
         final Set<BlockMenu> menus = new HashSet<>();
         for (Location location : this.crafters) {
-            BlockMenu menu = BlockStorage.getInventory(location);
+            BlockMenu menu = getOwnedInventory(location);
             if (menu != null) {
                 menus.add(menu);
             }
@@ -485,7 +492,7 @@ public class NetworkRoot extends NetworkNode {
     public Set<BlockMenu> getGreedyBlocks() {
         final Set<BlockMenu> menus = new HashSet<>();
         for (Location location : this.greedyBlocks) {
-            BlockMenu menu = BlockStorage.getInventory(location);
+            BlockMenu menu = getOwnedInventory(location);
             if (menu != null) {
                 menus.add(menu);
             }
@@ -566,6 +573,8 @@ public class NetworkRoot extends NetworkNode {
                 )) {
                     continue;
                 }
+
+                blockMenu.markDirty();
 
                 // Stack is null, so we can fill it here
                 if (stackToReturn == null) {
@@ -802,6 +811,7 @@ public class NetworkRoot extends NetworkNode {
 
                 itemStack.setAmount(itemStackAmount + amountToAdd);
                 incoming.setAmount(incomingStackAmount - amountToAdd);
+                blockMenu.markDirty();
             }
             // Given we have found a match, it doesn't matter if the item moved or not, we will not bring it in
             return;
@@ -868,25 +878,41 @@ public class NetworkRoot extends NetworkNode {
 
     @Override
     public long retrieveBlockCharge() {
-        return 0;
+        long totalCharge = 0;
+
+        for (Location node : powerNodes) {
+            final SlimefunItem item = getOwnedSlimefunItem(node);
+            if (!(item instanceof NetworkPowerNode powerNode)) {
+                continue;
+            }
+
+            final int charge = powerNode.getCharge(node);
+            if (charge > 0) {
+                totalCharge += charge;
+            }
+        }
+
+        return totalCharge;
     }
 
     public long getRootPower() {
-        return this.rootPower;
+        final long livePower = retrieveBlockCharge();
+        this.rootPower.set(livePower);
+        return livePower;
     }
 
     public void setRootPower(long power) {
-        this.rootPower = power;
+        this.rootPower.set(power);
     }
 
     public void addRootPower(long power) {
-        this.rootPower += power;
+        this.rootPower.addAndGet(power);
     }
 
     public void removeRootPower(long power) {
-        int removed = 0;
+        long removed = 0;
         for (Location node : powerNodes) {
-            final SlimefunItem item = BlockStorage.check(node);
+            final SlimefunItem item = getOwnedSlimefunItem(node);
             if (item instanceof NetworkPowerNode powerNode) {
                 final int charge = powerNode.getCharge(node);
                 if (charge <= 0) {
@@ -894,7 +920,7 @@ public class NetworkRoot extends NetworkNode {
                 }
                 final int toRemove = (int) Math.min(power - removed, charge);
                 powerNode.removeCharge(node, toRemove);
-                this.rootPower -= power;
+                this.rootPower.addAndGet(-toRemove);
                 removed = removed + toRemove;
             }
             if (removed >= power) {
