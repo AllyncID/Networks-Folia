@@ -1,11 +1,13 @@
 package io.github.sefiraat.networks.slimefun.network.grid;
 
+import io.github.sefiraat.networks.Networks;
 import io.github.sefiraat.networks.NetworkStorage;
 import io.github.sefiraat.networks.network.GridItemRequest;
 import io.github.sefiraat.networks.network.NetworkRoot;
 import io.github.sefiraat.networks.network.NodeDefinition;
 import io.github.sefiraat.networks.network.NodeType;
 import io.github.sefiraat.networks.slimefun.network.NetworkObject;
+import io.github.sefiraat.networks.utils.FoliaSupport;
 import io.github.sefiraat.networks.utils.StackUtils;
 import io.github.sefiraat.networks.utils.Theme;
 import io.github.thebusybiscuit.slimefun4.api.items.ItemGroup;
@@ -34,6 +36,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.ParametersAreNonnullByDefault;
 import java.text.MessageFormat;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -41,6 +44,8 @@ import java.util.Locale;
 import java.util.Map;
 
 public abstract class AbstractGrid extends NetworkObject {
+
+    private static final String ADMIN_PERMISSION = "networks.admin";
 
     private static final SlimefunItemStack BLANK_SLOT_STACK = new SlimefunItemStack(
             "NTW_BLANK_SLOT",
@@ -299,12 +304,22 @@ public abstract class AbstractGrid extends NetworkObject {
 
         final ItemStack clone = itemStack.clone();
         final ItemMeta cloneMeta = clone.getItemMeta();
-        final List<String> cloneLore = cloneMeta.getLore();
 
-        cloneLore.remove(cloneLore.size() - 1);
-        cloneLore.remove(cloneLore.size() - 1);
-        cloneMeta.setLore(cloneLore);
-        clone.setItemMeta(cloneMeta);
+        if (cloneMeta != null && cloneMeta.hasLore()) {
+            final List<String> cloneLore = new ArrayList<>(cloneMeta.getLore());
+            if (cloneLore.size() >= 2) {
+                cloneLore.remove(cloneLore.size() - 1);
+                cloneLore.remove(cloneLore.size() - 1);
+                cloneMeta.setLore(cloneLore);
+                clone.setItemMeta(cloneMeta);
+            }
+        }
+
+        if (canRequestCustomAmount(player, action)) {
+            promptCustomAmount(player, clone, blockMenu);
+            return;
+        }
+
         int amount = 1;
 
         if (action.isRightClicked()) {
@@ -320,6 +335,127 @@ public abstract class AbstractGrid extends NetworkObject {
         }
 
         updateDisplay(blockMenu);
+    }
+
+    private boolean canRequestCustomAmount(@Nonnull Player player, @Nonnull ClickAction action) {
+        return action.isShiftClicked() && action.isRightClicked() && (player.isOp() || player.hasPermission(ADMIN_PERMISSION));
+    }
+
+    @ParametersAreNonnullByDefault
+    private void promptCustomAmount(Player player, ItemStack itemStack, BlockMenu blockMenu) {
+        final Location gridLocation = blockMenu.getLocation().clone();
+        final String itemName = getItemName(itemStack);
+
+        player.closeInventory();
+        player.sendMessage(Theme.WARNING + "Type the refund amount for " + Theme.PASSIVE + itemName + Theme.WARNING + " in chat.");
+        player.sendMessage(Theme.WARNING + "Type " + Theme.PASSIVE + "cancel" + Theme.WARNING + " to abort.");
+
+        ChatUtils.awaitInput(player, input -> {
+            final String trimmed = input.trim();
+            if (trimmed.isBlank() || trimmed.equalsIgnoreCase("cancel")) {
+                sendMessageToPlayer(player, Theme.WARNING + "Refund cancelled.");
+                return;
+            }
+
+            final Integer amount = parseRequestedAmount(trimmed);
+            if (amount == null) {
+                sendMessageToPlayer(player, Theme.ERROR + "Enter a whole number greater than 0.");
+                return;
+            }
+
+            FoliaSupport.executeRegion(Networks.getInstance(), gridLocation, () -> fulfillCustomRequest(player, gridLocation, itemStack, itemName, amount));
+        });
+    }
+
+    @ParametersAreNonnullByDefault
+    private void fulfillCustomRequest(Player player, Location gridLocation, ItemStack itemStack, String itemName, int amount) {
+        final NodeDefinition currentDefinition = NetworkStorage.getAllNetworkObjects().get(gridLocation);
+        if (currentDefinition == null || currentDefinition.getNode() == null) {
+            sendMessageToPlayer(player, Theme.ERROR + "This grid is no longer connected to a network.");
+            return;
+        }
+
+        final BlockMenu currentMenu = BlockStorage.getInventory(gridLocation);
+        if (currentMenu == null) {
+            sendMessageToPlayer(player, Theme.ERROR + "This grid is no longer available.");
+            return;
+        }
+
+        final int refundedAmount = refundIntoNetwork(currentDefinition.getNode().getRoot(), itemStack, amount);
+        if (refundedAmount <= 0) {
+            sendMessageToPlayer(player, Theme.WARNING + "The network had no room for that refund.");
+            updateDisplay(currentMenu);
+            return;
+        }
+
+        if (refundedAmount < amount) {
+            sendMessageToPlayer(
+                player,
+                Theme.WARNING + "Refunded " + Theme.PASSIVE + refundedAmount + Theme.WARNING + "x " + Theme.PASSIVE
+                    + itemName + Theme.WARNING + " into the network. The rest could not fit."
+            );
+        } else {
+            sendMessageToPlayer(
+                player,
+                Theme.SUCCESS + "Refunded " + Theme.PASSIVE + refundedAmount + Theme.SUCCESS + "x " + Theme.PASSIVE
+                    + itemName + Theme.SUCCESS + " into the network."
+            );
+        }
+
+        updateDisplay(currentMenu);
+    }
+
+    @ParametersAreNonnullByDefault
+    private int refundIntoNetwork(NetworkRoot root, ItemStack itemStack, int amount) {
+        int remaining = amount;
+
+        while (remaining > 0) {
+            final ItemStack stackToRefund = itemStack.clone();
+            final int stackAmount = Math.min(stackToRefund.getMaxStackSize(), remaining);
+            stackToRefund.setAmount(stackAmount);
+
+            root.addItemStack(stackToRefund);
+
+            final int refunded = stackAmount - stackToRefund.getAmount();
+            if (refunded <= 0) {
+                break;
+            }
+
+            remaining -= refunded;
+        }
+
+        return amount - remaining;
+    }
+
+    @Nullable
+    private Integer parseRequestedAmount(@Nonnull String input) {
+        final String normalized = input.replace(",", "").replace("_", "");
+
+        try {
+            final int amount = Integer.parseInt(normalized);
+            return amount > 0 ? amount : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private void sendMessageToPlayer(@Nonnull Player player, @Nonnull String message) {
+        FoliaSupport.executeEntity(Networks.getInstance(), player, () -> player.sendMessage(message));
+    }
+
+    @Nonnull
+    private String getItemName(@Nonnull ItemStack itemStack) {
+        final SlimefunItem slimefunItem = SlimefunItem.getByItem(itemStack);
+        if (slimefunItem != null) {
+            return ChatColor.stripColor(slimefunItem.getItemName());
+        }
+
+        final ItemMeta itemMeta = itemStack.getItemMeta();
+        if (itemMeta != null && itemMeta.hasDisplayName()) {
+            return ChatColor.stripColor(itemMeta.getDisplayName());
+        }
+
+        return ChatUtils.humanize(itemStack.getType().name());
     }
 
     @ParametersAreNonnullByDefault

@@ -15,8 +15,8 @@ import org.bukkit.inventory.ItemStack;
 
 import javax.annotation.Nonnull;
 import java.util.EnumSet;
-import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class NetworkNode {
 
@@ -29,7 +29,7 @@ public class NetworkNode {
         BlockFace.WEST
     );
 
-    protected final Set<NetworkNode> childrenNodes = new HashSet<>();
+    protected final Set<NetworkNode> childrenNodes = ConcurrentHashMap.newKeySet();
     protected NetworkNode parent = null;
     protected NetworkRoot root = null;
     protected Location nodePosition;
@@ -123,19 +123,19 @@ public class NetworkNode {
     }
 
     private void killAdditionalController(@Nonnull Location location) {
-        final Block block = location.getBlock();
-        final ItemStack toDrop = BlockStorage.retrieve(block);
-        if (toDrop != null) {
-            FoliaSupport.executeRegion(Networks.getInstance(), location, () -> {
+        FoliaSupport.executeRegion(Networks.getInstance(), location, () -> {
+            final Block block = location.getBlock();
+            final ItemStack toDrop = BlockStorage.retrieve(block);
+            if (toDrop != null) {
                 location.getWorld().dropItemNaturally(location, toDrop);
                 block.setType(Material.AIR);
-            });
+            }
             NetworkController.wipeNetwork(location);
-        }
+        });
     }
 
     protected long retrieveBlockCharge() {
-        if (this.nodeType == NodeType.POWER_NODE) {
+        if (this.nodeType == NodeType.POWER_NODE && FoliaSupport.isOwnedByCurrentRegion(this.nodePosition)) {
             int blockCharge = 0;
             final SlimefunItem item = BlockStorage.check(this.nodePosition);
             if (item instanceof NetworkPowerNode powerNode) {

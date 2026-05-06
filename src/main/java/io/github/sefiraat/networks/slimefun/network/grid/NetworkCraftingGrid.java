@@ -231,6 +231,7 @@ public class NetworkCraftingGrid extends AbstractGrid {
 
         // Push item
         menu.pushItem(crafted, CRAFT_OUTPUT_SLOT);
+        menu.markDirty();
 
         // Let's clear down all the items
         for (int recipeSlot : CRAFT_ITEMS) {
@@ -239,7 +240,7 @@ public class NetworkCraftingGrid extends AbstractGrid {
                 // Grab a clone for potential retrieval
                 final ItemStack itemInSlotClone = itemInSlot.clone();
                 itemInSlotClone.setAmount(1);
-                ItemUtils.consumeItem(menu.getItemInSlot(recipeSlot), 1, true);
+                menu.consumeItem(recipeSlot, 1, true);
                 // We have consumed a slot item and now the slot it empty - try to refill
                 if (menu.getItemInSlot(recipeSlot) == null) {
                     // Process item request

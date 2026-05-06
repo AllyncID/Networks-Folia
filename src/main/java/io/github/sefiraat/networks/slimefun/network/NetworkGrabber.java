@@ -42,7 +42,7 @@ public class NetworkGrabber extends NetworkDirectional {
         }
 
         final BlockFace direction = this.getCurrentDirection(blockMenu);
-        final BlockMenu targetMenu = BlockStorage.getInventory(blockMenu.getBlock().getRelative(direction));
+        final BlockMenu targetMenu = getAdjacentOwnedMenu(blockMenu, direction);
 
         if (targetMenu == null) {
             return;

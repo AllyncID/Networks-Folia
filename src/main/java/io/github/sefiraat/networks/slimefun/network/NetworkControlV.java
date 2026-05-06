@@ -99,7 +99,10 @@ public class NetworkControlV extends NetworkDirectional {
             return;
         }
 
-        final Block targetBlock = blockMenu.getBlock().getRelative(direction);
+        final Block targetBlock = getAdjacentOwnedBlock(blockMenu.getBlock(), direction);
+        if (targetBlock == null) {
+            return;
+        }
         final BlockPosition targetPosition = new BlockPosition(targetBlock);
 
         if (this.blockCache.contains(targetPosition)) {
@@ -109,6 +112,10 @@ public class NetworkControlV extends NetworkDirectional {
         final Material material = targetBlock.getType();
 
         if (!material.isAir()) {
+            return;
+        }
+
+        if (hasStoredSlimefunData(targetBlock)) {
             return;
         }
 
@@ -149,6 +156,12 @@ public class NetworkControlV extends NetworkDirectional {
 
         this.blockCache.add(targetPosition);
         FoliaSupport.executeRegion(Networks.getInstance(), targetBlock.getLocation(), () -> {
+            if (!targetBlock.getType().isAir() || hasStoredSlimefunData(targetBlock)) {
+                definition.getNode().getRoot().addItemStack(fetchedStack);
+                this.blockCache.remove(targetPosition);
+                return;
+            }
+
             targetBlock.setType(fetchedStack.getType(), true);
             if (SupportedPluginManager.getInstance().isMcMMO()) {
                 mcMMO.getPlaceStore().setTrue(targetBlock);

@@ -100,7 +100,10 @@ public class NetworkControlX extends NetworkDirectional {
             return;
         }
 
-        final Block targetBlock = blockMenu.getBlock().getRelative(direction);
+        final Block targetBlock = getAdjacentOwnedBlock(blockMenu.getBlock(), direction);
+        if (targetBlock == null) {
+            return;
+        }
         final BlockPosition targetPosition = new BlockPosition(targetBlock);
 
         if (this.blockCache.contains(targetPosition)) {
@@ -110,6 +113,10 @@ public class NetworkControlX extends NetworkDirectional {
         final Material material = targetBlock.getType();
 
         if (material.getHardness() < 0 || material.isAir()) {
+            return;
+        }
+
+        if (hasStoredSlimefunData(targetBlock)) {
             return;
         }
 
@@ -157,6 +164,12 @@ public class NetworkControlX extends NetworkDirectional {
                 // The InventoryHolder check was already performed synchronously,
                 // but we check again inside the task as a fallback to prevent race conditions.
                 final BlockStateSnapshotResult blockState = PaperLib.getBlockState(targetBlock, true);
+
+                if (hasStoredSlimefunData(targetBlock) || BlockStorage.check(targetBlock) != null) {
+                    definition.getNode().getRoot().addItemStack(new ItemStack(material, 1));
+                    this.blockCache.remove(targetPosition);
+                    return;
+                }
 
                 if (blockState.getState() instanceof InventoryHolder) {
                     // It's an inventory block, refund the item

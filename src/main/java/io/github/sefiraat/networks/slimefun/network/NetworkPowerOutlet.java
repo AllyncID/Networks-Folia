@@ -46,7 +46,10 @@ public class NetworkPowerOutlet extends NetworkDirectional {
         }
 
         final BlockFace blockFace = getCurrentDirection(menu);
-        final Block targetBlock = b.getRelative(blockFace);
+        final Block targetBlock = getAdjacentOwnedBlock(b, blockFace);
+        if (targetBlock == null) {
+            return;
+        }
         final SlimefunItem slimefunItem = BlockStorage.check(targetBlock);
 
         if (!(slimefunItem instanceof EnergyNetComponent component) || slimefunItem instanceof NetworkObject) {

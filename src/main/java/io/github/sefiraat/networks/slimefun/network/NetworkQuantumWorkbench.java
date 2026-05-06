@@ -155,6 +155,7 @@ public class NetworkQuantumWorkbench extends SlimefunItem {
             }
 
             menu.pushItem(crafted, OUTPUT_SLOT);
+            menu.markDirty();
             for (int recipeSlot : RECIPE_SLOTS) {
                 if (menu.getItemInSlot(recipeSlot) != null) {
                     menu.consumeItem(recipeSlot, 1, true);

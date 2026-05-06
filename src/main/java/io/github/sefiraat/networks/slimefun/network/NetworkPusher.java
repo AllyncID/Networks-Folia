@@ -64,7 +64,7 @@ public class NetworkPusher extends NetworkDirectional {
         }
 
         final BlockFace direction = getCurrentDirection(blockMenu);
-        final BlockMenu targetMenu = BlockStorage.getInventory(blockMenu.getBlock().getRelative(direction));
+        final BlockMenu targetMenu = getAdjacentOwnedMenu(blockMenu, direction);
 
         if (targetMenu == null) {
             return;
@@ -101,6 +101,7 @@ public class NetworkPusher extends NetworkDirectional {
                 ItemStack retrieved = definition.getNode().getRoot().getItemStack(itemRequest);
                 if (retrieved != null) {
                     targetMenu.pushItem(retrieved, slots);
+                    targetMenu.markDirty();
                     if (definition.getNode().getRoot().isDisplayParticles()) {
                         showParticle(blockMenu.getLocation(), direction);
                     }

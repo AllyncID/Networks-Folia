@@ -121,6 +121,7 @@ public class NetworkExport extends NetworkObject {
         ItemStack retrieved = definition.getNode().getRoot().getItemStack(itemRequest);
         if (retrieved != null) {
             blockMenu.pushItem(retrieved, OUTPUT_ITEM_SLOT);
+            blockMenu.markDirty();
         }
     }
 

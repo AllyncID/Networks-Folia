@@ -234,6 +234,7 @@ public class NetworkAutoCrafter extends NetworkObject {
             location.getWorld().spawnParticle(Particle.WAX_OFF, location, 0, 0, 4, 0);
         }
         blockMenu.pushItem(crafted, OUTPUT_SLOT);
+        blockMenu.markDirty();
         return true;
     }
 
