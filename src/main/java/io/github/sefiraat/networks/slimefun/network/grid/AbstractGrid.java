@@ -146,8 +146,19 @@ public abstract class AbstractGrid extends NetworkObject {
             return;
         }
 
-        definition.getNode().getRoot().addItemStack(itemStack);
-        blockMenu.replaceExistingItem(getInputSlot(), null);
+        final ItemStack incoming = itemStack.clone();
+        definition.getNode().getRoot().addItemStack(incoming);
+
+        if (incoming.getAmount() <= 0) {
+            blockMenu.replaceExistingItem(getInputSlot(), null);
+            return;
+        }
+
+        if (incoming.getAmount() < itemStack.getAmount()) {
+            final ItemStack remainder = itemStack.clone();
+            remainder.setAmount(incoming.getAmount());
+            blockMenu.replaceExistingItem(getInputSlot(), remainder);
+        }
     }
 
     @Override
