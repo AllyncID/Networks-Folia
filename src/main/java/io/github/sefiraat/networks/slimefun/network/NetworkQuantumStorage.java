@@ -185,10 +185,25 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     }
 
     private void onTick(Block block) {
+        final Location location = block.getLocation();
+
+        if (BlockStorage.check(block) != this) {
+            final boolean removedCache = CACHES.remove(location) != null;
+            final boolean removedPending = PENDING_STARTUP_SYNCS.remove(location) != null;
+            if (removedCache || removedPending) {
+                GridCacheManager.markAllCachesDirty();
+            }
+            return;
+        }
+
         final BlockMenu blockMenu = BlockStorage.getInventory(block);
 
         if (blockMenu == null) {
-            CACHES.remove(block.getLocation());
+            final boolean removedCache = CACHES.remove(location) != null;
+            final boolean removedPending = PENDING_STARTUP_SYNCS.remove(location) != null;
+            if (removedCache || removedPending) {
+                GridCacheManager.markAllCachesDirty();
+            }
             return;
         }
 
@@ -708,6 +723,8 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         final ItemMeta itemMeta = itemStack.getItemMeta();
         final QuantumCache cache = DataTypeMethods.getCustom(itemMeta, Keys.QUANTUM_STORAGE_INSTANCE, PersistentQuantumStorageType.TYPE);
 
+        BlockStorage.addBlockInfo(location, "id", getId(), true);
+        DeferredBlockStorageSave.markDirty(location);
         CACHES.remove(location);
         PENDING_STARTUP_SYNCS.remove(location);
         GridCacheManager.markAllCachesDirty();

@@ -373,7 +373,18 @@ public class NetworkRoot extends NetworkNode {
 
             final QuantumCache quantumCache = NetworkQuantumStorage.getCaches().get(testLocation);
             if (quantumCache != null) {
-                final BlockMenu menu = isOwnedByCurrentRegion(testLocation) ? getOwnedInventory(testLocation) : null;
+                final BlockMenu menu;
+                if (isOwnedByCurrentRegion(testLocation)) {
+                    final SlimefunItem slimefunItem = getOwnedSlimefunItem(testLocation);
+                    if (!(slimefunItem instanceof NetworkQuantumStorage)) {
+                        NetworkQuantumStorage.getCaches().remove(testLocation);
+                        continue;
+                    }
+                    menu = getOwnedInventory(testLocation);
+                } else {
+                    menu = null;
+                }
+
                 final NetworkStorage storage = getNetworkStorage(testLocation, menu, quantumCache);
                 if (storage != null) {
                     barrelSet.add(storage);

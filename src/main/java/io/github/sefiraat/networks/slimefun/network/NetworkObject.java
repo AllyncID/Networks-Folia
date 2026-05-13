@@ -209,12 +209,12 @@ public abstract class NetworkObject extends SlimefunItem implements AdminDebugga
     }
 
     protected void onPlace(@Nonnull BlockPlaceEvent event) {
-
+        persistBlockMetadata(event.getBlock().getLocation());
     }
 
     public void persistBlockMetadata(@Nonnull Location location) {
         final String storedId = BlockStorage.getLocationInfo(location, "id");
-        if (storedId == null || storedId.isBlank()) {
+        if (storedId == null || storedId.isBlank() || !storedId.equals(getId())) {
             BlockStorage.addBlockInfo(location, "id", getId(), true);
         }
 

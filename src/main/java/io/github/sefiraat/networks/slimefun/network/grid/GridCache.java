@@ -17,7 +17,7 @@ public class GridCache {
     private String filter;
     @Nullable
     private List<Map.Entry<ItemStack, Integer>> cachedEntries;
-    private boolean dirty = true;
+    private volatile boolean dirty = true;
 
     public GridCache(int page, int maxPages, @Nonnull SortOrder sortOrder) {
         this.page = page;

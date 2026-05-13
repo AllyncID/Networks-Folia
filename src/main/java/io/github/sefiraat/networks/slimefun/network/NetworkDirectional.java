@@ -40,6 +40,7 @@ import javax.annotation.Nullable;
 import javax.annotation.OverridingMethodsMustInvokeSuper;
 import javax.annotation.ParametersAreNonnullByDefault;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -47,6 +48,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class NetworkDirectional extends NetworkObject {
+
+    private static final int MENU_SIZE = 45;
 
     private static final int NORTH_SLOT = 12;
     private static final int SOUTH_SLOT = 30;
@@ -82,14 +85,16 @@ public abstract class NetworkDirectional extends NetworkObject {
                     @Override
                     public void onPlayerPlace(@Nonnull BlockPlaceEvent event) {
                         final Location location = event.getBlock().getLocation();
+                        final BlockMenu blockMenu = BlockStorage.getInventory(event.getBlock());
                         NetworkStorage.removeNode(location);
                         SELECTED_DIRECTION_MAP.remove(location);
+                        sanitizeMenu(blockMenu);
                         BlockStorage.addBlockInfo(location, OWNER_KEY, event.getPlayer().getUniqueId().toString());
                         BlockStorage.addBlockInfo(location, DIRECTION, BlockFace.SELF.name());
                         PersistentNetworkMetadata.setString(location, OWNER_KEY, event.getPlayer().getUniqueId().toString());
                         PersistentNetworkMetadata.setString(location, DIRECTION, BlockFace.SELF.name());
                         SELECTED_DIRECTION_MAP.put(location.clone(), BlockFace.SELF);
-                        NetworkUtils.applyConfig(NetworkDirectional.this, BlockStorage.getInventory(event.getBlock()), event.getPlayer());
+                        NetworkUtils.applyConfig(NetworkDirectional.this, blockMenu, event.getPlayer());
                         persistBlockMetadata(location);
                     }
                 },
@@ -249,6 +254,7 @@ public abstract class NetworkDirectional extends NetworkObject {
 
             @Override
             public void init() {
+                setSize(MENU_SIZE);
                 drawBackground(getBackgroundSlots());
 
                 if (getOtherBackgroundSlots() != null && getOtherBackgroundStack() != null) {
@@ -265,6 +271,7 @@ public abstract class NetworkDirectional extends NetworkObject {
 
             @Override
             public void newInstance(@Nonnull BlockMenu blockMenu, @Nonnull Block b) {
+                sanitizeMenu(blockMenu);
                 final BlockFace direction = readStoredDirection(blockMenu.getLocation());
                 SELECTED_DIRECTION_MAP.put(blockMenu.getLocation().clone(), direction);
 
@@ -496,6 +503,56 @@ public abstract class NetworkDirectional extends NetworkObject {
 
     protected Particle.DustOptions getDustOptions() {
         return new Particle.DustOptions(Color.RED, 1);
+    }
+
+    private void sanitizeMenu(@Nullable BlockMenu blockMenu) {
+        if (blockMenu == null) {
+            return;
+        }
+
+        final Set<Integer> validSlots = new HashSet<>();
+        addSlots(validSlots, getBackgroundSlots());
+        addSlots(validSlots, getOtherBackgroundSlots());
+        addSlots(validSlots, getItemSlots());
+        addSlots(validSlots, getInputSlots());
+        addSlots(validSlots, getOutputSlots());
+        validSlots.add(getNorthSlot());
+        validSlots.add(getSouthSlot());
+        validSlots.add(getEastSlot());
+        validSlots.add(getWestSlot());
+        validSlots.add(getUpSlot());
+        validSlots.add(getDownSlot());
+
+        final ItemStack[] contents = blockMenu.getContents();
+        boolean changed = false;
+
+        for (int slot = 0; slot < contents.length; slot++) {
+            if (validSlots.contains(slot)) {
+                continue;
+            }
+
+            final ItemStack existing = contents[slot];
+            if (existing != null && existing.getType() != Material.AIR) {
+                blockMenu.replaceExistingItem(slot, null);
+                changed = true;
+            }
+
+            blockMenu.addMenuClickHandler(slot, (p, i, itemStack, clickAction) -> false);
+        }
+
+        if (changed) {
+            blockMenu.markDirty();
+        }
+    }
+
+    private static void addSlots(@Nonnull Set<Integer> slots, @Nullable int[] values) {
+        if (values == null) {
+            return;
+        }
+
+        for (int value : values) {
+            slots.add(value);
+        }
     }
 
     protected void showParticle(@Nonnull Location location, @Nonnull BlockFace blockFace) {

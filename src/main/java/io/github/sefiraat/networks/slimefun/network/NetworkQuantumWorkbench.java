@@ -9,6 +9,7 @@ import io.github.thebusybiscuit.slimefun4.api.items.ItemGroup;
 import io.github.thebusybiscuit.slimefun4.api.items.SlimefunItem;
 import io.github.thebusybiscuit.slimefun4.api.items.SlimefunItemStack;
 import io.github.thebusybiscuit.slimefun4.api.recipes.RecipeType;
+import io.github.thebusybiscuit.slimefun4.core.handlers.BlockPlaceHandler;
 import io.github.thebusybiscuit.slimefun4.core.handlers.BlockBreakHandler;
 import io.github.thebusybiscuit.slimefun4.implementation.Slimefun;
 import io.github.thebusybiscuit.slimefun4.libraries.dough.protection.Interaction;
@@ -21,6 +22,7 @@ import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
@@ -29,6 +31,8 @@ import javax.annotation.ParametersAreNonnullByDefault;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import io.github.sefiraat.networks.utils.DeferredBlockStorageSave;
 
 public class NetworkQuantumWorkbench extends SlimefunItem {
 
@@ -67,7 +71,17 @@ public class NetworkQuantumWorkbench extends SlimefunItem {
 
     @Override
     public void preRegister() {
-        addItemHandler(getBlockBreakHandler());
+        addItemHandler(
+            getBlockBreakHandler(),
+            new BlockPlaceHandler(false) {
+                @Override
+                public void onPlayerPlace(@Nonnull BlockPlaceEvent event) {
+                    final Block block = event.getBlock();
+                    BlockStorage.addBlockInfo(block, "id", getId(), true);
+                    DeferredBlockStorageSave.markDirty(block.getLocation());
+                }
+            }
+        );
     }
 
     @Override
