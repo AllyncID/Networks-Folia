@@ -1,8 +1,10 @@
 package io.github.sefiraat.networks.slimefun.network;
 
 import io.github.sefiraat.networks.NetworkStorage;
+import io.github.sefiraat.networks.network.NetworkRoot;
 import io.github.sefiraat.networks.network.NodeDefinition;
 import io.github.sefiraat.networks.network.NodeType;
+import io.github.sefiraat.networks.network.stackcaches.BarrelIdentity;
 import io.github.sefiraat.networks.network.stackcaches.ItemRequest;
 import io.github.sefiraat.networks.utils.StackUtils;
 import io.github.sefiraat.networks.utils.Theme;
@@ -21,6 +23,7 @@ import org.bukkit.inventory.ItemStack;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import java.util.Set;
 
 public class NetworkPusher extends NetworkDirectional {
 
@@ -70,6 +73,9 @@ public class NetworkPusher extends NetworkDirectional {
             return;
         }
 
+        final NetworkRoot root = definition.getNode().getRoot();
+        final Set<BarrelIdentity> barrels = root.getCachedBarrels();
+
         for (int itemSlot : this.getItemSlots()) {
             final ItemStack testItem = blockMenu.getItemInSlot(itemSlot);
 
@@ -98,11 +104,11 @@ public class NetworkPusher extends NetworkDirectional {
                     }
                 }
 
-                ItemStack retrieved = definition.getNode().getRoot().getItemStack(itemRequest);
+                ItemStack retrieved = root.getItemStack(itemRequest, barrels);
                 if (retrieved != null) {
                     targetMenu.pushItem(retrieved, slots);
                     targetMenu.markDirty();
-                    if (definition.getNode().getRoot().isDisplayParticles()) {
+                    if (root.isDisplayParticles()) {
                         showParticle(blockMenu.getLocation(), direction);
                     }
                 }

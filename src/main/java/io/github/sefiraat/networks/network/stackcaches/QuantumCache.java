@@ -15,6 +15,9 @@ public class QuantumCache extends ItemStackCache {
     private final int limit;
     private int amount;
     private boolean voidExcess;
+    @Nullable
+    private String serializedItemStack;
+    private boolean serializedItemStackCached;
 
     public QuantumCache(@Nullable ItemStack storedItem, int amount, int limit, boolean voidExcess) {
         super(storedItem);
@@ -64,6 +67,27 @@ public class QuantumCache extends ItemStackCache {
 
     public void setVoidExcess(boolean voidExcess) {
         this.voidExcess = voidExcess;
+    }
+
+    @Override
+    public void setItemStack(ItemStack itemStack) {
+        super.setItemStack(itemStack);
+        this.serializedItemStack = null;
+        this.serializedItemStackCached = false;
+    }
+
+    public boolean hasSerializedItemStack() {
+        return this.serializedItemStackCached;
+    }
+
+    @Nullable
+    public String getSerializedItemStack() {
+        return this.serializedItemStack;
+    }
+
+    public void setSerializedItemStack(@Nullable String serializedItemStack) {
+        this.serializedItemStack = serializedItemStack;
+        this.serializedItemStackCached = true;
     }
 
     @Nullable

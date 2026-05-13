@@ -29,6 +29,7 @@ import me.mrCookieSlime.Slimefun.api.BlockStorage;
 import me.mrCookieSlime.Slimefun.api.inventory.BlockMenu;
 import me.mrCookieSlime.Slimefun.api.inventory.BlockMenuPreset;
 import me.mrCookieSlime.Slimefun.api.item_transport.ItemTransportFlow;
+import org.bukkit.Bukkit;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.ChatColor;
@@ -51,6 +52,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveItem {
 
@@ -133,6 +135,8 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     private static final int[] BACKGROUND_SLOTS = new int[]{9, 10, 11, 12, 14, 15};
 
     private static final Map<Location, QuantumCache> CACHES = new ConcurrentHashMap<>();
+    private static final Map<Location, QuantumCache> PENDING_STARTUP_SYNCS = new ConcurrentHashMap<>();
+    private static final AtomicBoolean STARTUP_SYNC_SCHEDULED = new AtomicBoolean(false);
 
     static {
         final ItemMeta itemMeta = NO_ITEM.getItemMeta();
@@ -191,11 +195,8 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         final QuantumCache cache = CACHES.get(blockMenu.getLocation());
 
         if (cache == null) {
+            addCache(blockMenu);
             return;
-        }
-
-        if (blockMenu.hasViewer()) {
-            updateDisplayItem(blockMenu, cache);
         }
 
         // Move items from the input slot into the card
@@ -223,6 +224,10 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         }
 
         CACHES.put(blockMenu.getLocation().clone(), cache);
+
+        if (blockMenu.hasViewer()) {
+            updateDisplayItem(blockMenu, cache);
+        }
     }
 
     private void toggleVoid(@Nonnull BlockMenu blockMenu) {
@@ -611,7 +616,7 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         }
     }
 
-    private boolean absorbStoredSlot(@Nonnull BlockMenu blockMenu, @Nonnull QuantumCache cache, int slot) {
+    private static boolean absorbStoredSlot(@Nonnull BlockMenu blockMenu, @Nonnull QuantumCache cache, int slot) {
         final ItemStack slotItem = blockMenu.getItemInSlot(slot);
 
         if (slotItem == null || slotItem.getType() == Material.AIR || !StackUtils.itemsMatch(cache, slotItem, true)) {
@@ -630,6 +635,20 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         }
 
         return true;
+    }
+
+    private static void collapseStoredSlotsIntoCache(@Nonnull BlockMenu blockMenu, @Nonnull QuantumCache cache) {
+        if (cache.getItemStack() == null) {
+            return;
+        }
+
+        boolean changed = false;
+        changed |= absorbStoredSlot(blockMenu, cache, INPUT_SLOT);
+        changed |= absorbStoredSlot(blockMenu, cache, OUTPUT_SLOT);
+
+        if (changed) {
+            blockMenu.markDirty();
+        }
     }
 
     private boolean isDisplayItem(@Nonnull ItemStack itemStack) {
@@ -658,38 +677,47 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     protected void onBreak(@Nonnull BlockBreakEvent event) {
         final Location location = event.getBlock().getLocation();
         final BlockMenu blockMenu = BlockStorage.getInventory(event.getBlock());
+        final QuantumCache cache = CACHES.remove(location);
+
+        PENDING_STARTUP_SYNCS.remove(location);
+        GridCacheManager.markAllCachesDirty();
+
+        if (cache != null && cache.getAmount() > 0 && cache.getItemStack() != null) {
+            final ItemStack itemToDrop = this.getItem().clone();
+            final ItemMeta itemMeta = itemToDrop.getItemMeta();
+
+            DataTypeMethods.setCustom(itemMeta, Keys.QUANTUM_STORAGE_INSTANCE, PersistentQuantumStorageType.TYPE, cache);
+            cache.addMetaLore(itemMeta);
+            itemToDrop.setItemMeta(itemMeta);
+            location.getWorld().dropItem(location.clone().add(0.5, 0.5, 0.5), itemToDrop);
+            event.setDropItems(false);
+        }
 
         if (blockMenu != null) {
-            final QuantumCache cache = CACHES.remove(blockMenu.getLocation());
-
-            if (cache != null && cache.getAmount() > 0 && cache.getItemStack() != null) {
-                final ItemStack itemToDrop = this.getItem().clone();
-                final ItemMeta itemMeta = itemToDrop.getItemMeta();
-
-                DataTypeMethods.setCustom(itemMeta, Keys.QUANTUM_STORAGE_INSTANCE, PersistentQuantumStorageType.TYPE, cache);
-                cache.addMetaLore(itemMeta);
-                itemToDrop.setItemMeta(itemMeta);
-                location.getWorld().dropItem(location.clone().add(0.5, 0.5, 0.5), itemToDrop);
-                event.setDropItems(false);
-            }
-
             for (int i : this.slotsToDrop) {
                 blockMenu.dropItems(location, i);
             }
         }
+
+        BlockStorage.clearBlockInfo(location);
     }
 
     protected void onPlace(@Nonnull BlockPlaceEvent event) {
+        final Location location = event.getBlock().getLocation();
         final ItemStack itemStack = event.getItemInHand();
         final ItemMeta itemMeta = itemStack.getItemMeta();
         final QuantumCache cache = DataTypeMethods.getCustom(itemMeta, Keys.QUANTUM_STORAGE_INSTANCE, PersistentQuantumStorageType.TYPE);
+
+        CACHES.remove(location);
+        PENDING_STARTUP_SYNCS.remove(location);
+        GridCacheManager.markAllCachesDirty();
 
         if (cache == null) {
             return;
         }
 
-        syncBlock(event.getBlock().getLocation(), cache);
-        CACHES.put(event.getBlock().getLocation(), cache);
+        syncBlock(location, cache);
+        CACHES.put(location, cache);
     }
 
     public int getMaxAmount() {
@@ -779,6 +807,22 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         }
     }
 
+    private static int getDisplayedAmount(@Nullable BlockMenu blockMenu, @Nonnull QuantumCache cache) {
+        int displayedAmount = cache.getAmount();
+
+        if (blockMenu == null) {
+            return displayedAmount;
+        }
+
+        final ItemStack output = blockMenu.getItemInSlot(OUTPUT_SLOT);
+        if (output == null || output.getType() == Material.AIR || !StackUtils.itemsMatch(cache, output, true)) {
+            return displayedAmount;
+        }
+
+        final long total = (long) displayedAmount + (long) output.getAmount();
+        return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
+    }
+
     private static void updateDisplayItem(@Nonnull BlockMenu menu, @Nonnull QuantumCache cache) {
         if (cache.getItemStack() == null) {
             menu.replaceExistingItem(ITEM_SLOT, NO_ITEM.item());
@@ -786,9 +830,10 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
             final ItemStack itemStack = cache.getItemStack().clone();
             final ItemMeta itemMeta = itemStack.getItemMeta();
             final List<String> lore = itemMeta.hasLore() ? itemMeta.getLore() : new ArrayList<>();
+            final int displayedAmount = getDisplayedAmount(menu, cache);
             lore.add("");
             lore.add(Theme.CLICK_INFO + "Voiding: " + Theme.PASSIVE + StringUtils.toTitleCase(String.valueOf(cache.isVoidExcess())));
-            lore.add(Theme.CLICK_INFO + "Amount: " + Theme.PASSIVE + cache.getAmount());
+            lore.add(Theme.CLICK_INFO + "Amount: " + Theme.PASSIVE + displayedAmount);
             lore.add(Theme.CLICK_INFO + "Capacity: " + Theme.PASSIVE + cache.getLimit());
             itemMeta.setLore(lore);
             itemStack.setItemMeta(itemMeta);
@@ -798,12 +843,56 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
     }
 
     private static void syncBlock(@Nonnull Location location, @Nonnull QuantumCache cache) {
+        if (!isBlockStorageReady(location)) {
+            queueStartupSync(location, cache);
+            return;
+        }
+
         if (!FoliaSupport.isOwnedByCurrentRegion(location)) {
             FoliaSupport.executeRegion(Networks.getInstance(), location, () -> syncBlock(location, cache));
             return;
         }
 
         stageCache(location, cache, true);
+    }
+
+    private static boolean isBlockStorageReady(@Nonnull Location location) {
+        return location.getWorld() != null && BlockStorage.getStorage(location.getWorld()) != null;
+    }
+
+    private static void queueStartupSync(@Nonnull Location location, @Nonnull QuantumCache cache) {
+        PENDING_STARTUP_SYNCS.put(location, cache);
+        schedulePendingStartupSync();
+    }
+
+    private static void schedulePendingStartupSync() {
+        if (!STARTUP_SYNC_SCHEDULED.compareAndSet(false, true)) {
+            return;
+        }
+
+        FoliaSupport.runGlobalLater(Networks.getInstance(), 1L, NetworkQuantumStorage::flushPendingStartupSyncs);
+    }
+
+    private static void flushPendingStartupSyncs() {
+        STARTUP_SYNC_SCHEDULED.set(false);
+
+        if (PENDING_STARTUP_SYNCS.isEmpty()) {
+            return;
+        }
+
+        for (Map.Entry<Location, QuantumCache> entry : new ArrayList<>(PENDING_STARTUP_SYNCS.entrySet())) {
+            if (!isBlockStorageReady(entry.getKey())) {
+                continue;
+            }
+
+            if (PENDING_STARTUP_SYNCS.remove(entry.getKey(), entry.getValue())) {
+                syncBlock(entry.getKey(), entry.getValue());
+            }
+        }
+
+        if (!PENDING_STARTUP_SYNCS.isEmpty()) {
+            schedulePendingStartupSync();
+        }
     }
 
     private static void stageCache(@Nonnull Location location, @Nonnull QuantumCache cache, boolean markMenuDirty) {
@@ -815,7 +904,7 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
 
         BlockStorage.addBlockInfo(location, BS_AMOUNT, String.valueOf(cache.getAmount()));
         BlockStorage.addBlockInfo(location, BS_VOID, String.valueOf(cache.isVoidExcess()));
-        BlockStorage.addBlockInfo(location, BS_ITEM, serializeItemStack(cache.getItemStack()));
+        BlockStorage.addBlockInfo(location, BS_ITEM, getSerializedItemStack(cache));
         DeferredBlockStorageSave.markDirty(location);
 
         if (markMenuDirty) {
@@ -828,10 +917,68 @@ public class NetworkQuantumStorage extends SlimefunItem implements DistinctiveIt
         GridCacheManager.markAllCachesDirty();
     }
 
+    @Nullable
+    private static String getSerializedItemStack(@Nonnull QuantumCache cache) {
+        synchronized (cache) {
+            if (cache.hasSerializedItemStack()) {
+                return cache.getSerializedItemStack();
+            }
+
+            final String serialized = serializeItemStack(cache.getItemStack());
+            cache.setSerializedItemStack(serialized);
+            return serialized;
+        }
+    }
+
     public static void persistCaches() {
-        for (Map.Entry<Location, QuantumCache> entry : CACHES.entrySet()) {
+        for (Location location : getAllQuantumLocations()) {
+            ensureCache(location);
+        }
+
+        for (Map.Entry<Location, QuantumCache> entry : new ArrayList<>(CACHES.entrySet())) {
+            final BlockMenu blockMenu = BlockStorage.getInventory(entry.getKey());
+            if (blockMenu != null) {
+                collapseStoredSlotsIntoCache(blockMenu, entry.getValue());
+            }
             stageCache(entry.getKey(), entry.getValue(), false);
         }
+    }
+
+    private static void ensureCache(@Nonnull Location location) {
+        if (CACHES.containsKey(location)) {
+            return;
+        }
+
+        final BlockMenu blockMenu = BlockStorage.getInventory(location);
+        if (blockMenu == null) {
+            return;
+        }
+
+        final SlimefunItem slimefunItem = SlimefunItem.getById(BlockStorage.checkID(location));
+        if (slimefunItem instanceof NetworkQuantumStorage quantumStorage) {
+            quantumStorage.addCache(blockMenu);
+        }
+    }
+
+    @Nonnull
+    private static List<Location> getAllQuantumLocations() {
+        final List<Location> locations = new ArrayList<>();
+
+        for (org.bukkit.World world : Bukkit.getWorlds()) {
+            final Map<Location, Config> rawStorage = BlockStorage.getRawStorage(world);
+            if (rawStorage == null || rawStorage.isEmpty()) {
+                continue;
+            }
+
+            for (Map.Entry<Location, Config> entry : rawStorage.entrySet()) {
+                final SlimefunItem slimefunItem = SlimefunItem.getById(entry.getValue().getString("id"));
+                if (slimefunItem instanceof NetworkQuantumStorage) {
+                    locations.add(entry.getKey());
+                }
+            }
+        }
+
+        return locations;
     }
 
     private static boolean canPersistCache(@Nonnull QuantumCache cache) {

@@ -36,7 +36,7 @@ public class NetworkCraftingGrid extends AbstractGrid {
         9, 10, 11, 12, 13, 18, 19, 20, 21, 22, 27, 28, 29, 30, 31, 36, 37, 38, 39, 40
     };
 
-    private static final int[] CRAFT_ITEMS = {
+    public static final int[] CRAFT_ITEMS = {
         6, 7, 8, 15, 16, 17, 24, 25, 26
     };
 
@@ -47,7 +47,7 @@ public class NetworkCraftingGrid extends AbstractGrid {
     private static final int PAGE_NEXT = 48;
 
     private static final int CRAFT_BUTTON_SLOT = 34;
-    private static final int CRAFT_OUTPUT_SLOT = 43;
+    public static final int CRAFT_OUTPUT_SLOT = 43;
 
     private static final SlimefunItemStack CRAFT_BUTTON_STACK = new SlimefunItemStack(
         "NTW_CRAFT_BUTTON_STACK",

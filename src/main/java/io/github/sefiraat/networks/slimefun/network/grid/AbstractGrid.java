@@ -418,24 +418,7 @@ public abstract class AbstractGrid extends NetworkObject {
 
     @ParametersAreNonnullByDefault
     private int refundIntoNetwork(NetworkRoot root, ItemStack itemStack, int amount) {
-        int remaining = amount;
-
-        while (remaining > 0) {
-            final ItemStack stackToRefund = itemStack.clone();
-            final int stackAmount = Math.min(stackToRefund.getMaxStackSize(), remaining);
-            stackToRefund.setAmount(stackAmount);
-
-            root.addItemStack(stackToRefund);
-
-            final int refunded = stackAmount - stackToRefund.getAmount();
-            if (refunded <= 0) {
-                break;
-            }
-
-            remaining -= refunded;
-        }
-
-        return amount - remaining;
+        return root.addItemStack(itemStack, amount);
     }
 
     @Nullable

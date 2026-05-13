@@ -92,7 +92,7 @@ public class NetworkVanillaGrabber extends NetworkDirectional {
             return;
         }
 
-        if (hasStoredSlimefunData(targetBlock)) {
+        if (BlockStorage.getInventory(targetBlock) != null) {
             return;
         }
 
@@ -137,7 +137,9 @@ public class NetworkVanillaGrabber extends NetworkDirectional {
                 }
             }
         } else {
-            for (ItemStack stack : inventory.getContents()) {
+            final ItemStack[] contents = inventory.getContents();
+            for (int slot = contents.length - 1; slot >= 0; slot--) {
+                final ItemStack stack = contents[slot];
                 if (grabItem(blockMenu, stack)) {
                     return;
                 }

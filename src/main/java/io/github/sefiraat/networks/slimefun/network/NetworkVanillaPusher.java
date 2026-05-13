@@ -84,7 +84,7 @@ public class NetworkVanillaPusher extends NetworkDirectional {
             return;
         }
 
-        if (hasStoredSlimefunData(targetBlock)) {
+        if (BlockStorage.getInventory(targetBlock) != null) {
             return;
         }
 
@@ -118,6 +118,10 @@ public class NetworkVanillaPusher extends NetworkDirectional {
             sendDebugMessage(block.getLocation(), "WildChest test passed.");
             holder.getInventory().addItem(stack);
             stack.setAmount(0);
+        }
+
+        if (stack.getAmount() <= 0) {
+            blockMenu.markDirty();
         }
     }
 

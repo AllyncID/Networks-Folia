@@ -5,6 +5,7 @@ import io.github.sefiraat.networks.network.NetworkRoot;
 import io.github.sefiraat.networks.network.NodeDefinition;
 import io.github.sefiraat.networks.network.NodeType;
 import io.github.sefiraat.networks.network.SupportedRecipes;
+import io.github.sefiraat.networks.network.stackcaches.BarrelIdentity;
 import io.github.sefiraat.networks.network.stackcaches.BlueprintInstance;
 import io.github.sefiraat.networks.network.stackcaches.ItemRequest;
 import io.github.sefiraat.networks.slimefun.NetworkSlimefunItems;
@@ -38,6 +39,7 @@ import javax.annotation.Nonnull;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -82,7 +84,7 @@ public class NetworkAutoCrafter extends NetworkObject {
             new BlockTicker() {
                 @Override
                 public boolean isSynchronized() {
-                    return false;
+                    return true;
                 }
 
                 @Override
@@ -170,6 +172,7 @@ public class NetworkAutoCrafter extends NetworkObject {
     private boolean tryCraft(@Nonnull BlockMenu blockMenu, @Nonnull BlueprintInstance instance, @Nonnull NetworkRoot root) {
         // Get the recipe input
         final ItemStack[] inputs = new ItemStack[9];
+        final Set<BarrelIdentity> barrels = root.getBarrels();
 
         /* Make sure the network has the required items
          * Needs to be revisited as matching is happening stacks 2x when I should
@@ -183,17 +186,17 @@ public class NetworkAutoCrafter extends NetworkObject {
             }
         }
 
-        for (Map.Entry<ItemStack, Integer> entry : requiredItems.entrySet()) {
-            if (!root.contains(new ItemRequest(entry.getKey(), entry.getValue()))) {
-                return false;
-            }
-        }
-
-        // Then fetch the actual items
         for (int i = 0; i < 9; i++) {
             final ItemStack requested = instance.getRecipeItems()[i];
             if (requested != null) {
-                final ItemStack fetched = root.getItemStack(new ItemRequest(instance.getRecipeItems()[i], 1));
+                ItemStack fetched = root.getItemStack(new ItemRequest(instance.getRecipeItems()[i], 1), barrels);
+                if (fetched == null || fetched.getType() == Material.AIR) {
+                    fetched = root.getItemStackFromCraftingGrids(new ItemRequest(instance.getRecipeItems()[i], 1));
+                }
+                if (fetched == null || fetched.getType() == Material.AIR) {
+                    returnItems(root, inputs);
+                    return false;
+                }
                 inputs[i] = fetched;
             } else {
                 inputs[i] = null;
